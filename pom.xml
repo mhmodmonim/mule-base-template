@@ -4,7 +4,7 @@
 
 	<groupId>ae70f528-2250-49bd-bcca-c9f5cb212bf9</groupId>
 	<artifactId>mule-api-base-template</artifactId>
-	<version>1.0.1</version>
+	<version>1.0.2</version>
 	<packaging>mule-application</packaging>
 
 	<name>mule-api-base-template</name>
@@ -20,7 +20,7 @@
 		<categories>[]</categories>
 		<fields>[]</fields>
 	</properties>
-<profiles>
+	<profiles>
 		<profile>
 			<id>dev</id>
 			<build>
@@ -69,6 +69,30 @@
 				<artifactId>mule-maven-plugin</artifactId>
 				<version>${mule.maven.plugin.version}</version>
 				<extensions>true</extensions>
+				<configuration>
+					<cloudhub2Deployment>
+						<uri>https://anypoint.mulesoft.com</uri>
+						<provider>MC</provider>
+						<muleVersion>${app.runtime}</muleVersion>
+						<username>${username}</username>
+						<password>${password}</password>
+						<properties>
+							<anypoint.platform.base_uri>https://anypoint.mulesoft.com</anypoint.platform.base_uri>
+							<anypoint.platform.analytics_base_uri>https://analytics-ingest.anypoint.mulesoft.com</anypoint.platform.analytics_base_uri>
+						</properties>
+						<integrations>
+							<services>
+								<objectStoreV2>
+									<enabled>true</enabled>
+								</objectStoreV2>
+							</services>
+						</integrations>
+					</cloudhub2Deployment>
+					<sharedLibraries>
+						
+					</sharedLibraries>
+					<classifier>mule-application</classifier>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>
