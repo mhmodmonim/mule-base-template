@@ -16,7 +16,7 @@ real HTTP listener.
 | **Structured JSON logging** | Correlation-id propagation end to end, payload logging gated per environment |
 | **Split configuration** | Plain config and secrets in separate files, per environment, for four environments |
 | **MUnit suite** | Flow-level *and* end-to-end tests through the real listener, with coverage reporting |
-| **Jenkins pipeline** | Build once, promote dev → test → uat → prod, smoke test after each deploy |
+| **CI/CD pipelines** | Jenkins, GitHub Actions and Azure DevOps — each promotes dev → test → uat → approval → prod, with a smoke test after each deploy ([details](#cicd)) |
 | **Build metadata** | Maven stamps version and build time into the app; `/health-check` reports them |
 
 ---

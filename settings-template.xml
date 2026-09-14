@@ -18,8 +18,13 @@
                 Runtime Manager (Create/Read/Update Applications),
                 and the environments you deploy to.
 
-  In Jenkins this file is provided by the Config File Provider plugin as the
-  `maven-settings` config file - see Jenkins-README.md.
+  CI never reads this file:
+    * Jenkins injects the equivalent managed file `maven-settings` through
+      the Config File Provider plugin - see Jenkins-README.md.
+    * GitHub Actions and Azure DevOps use .ci/maven-settings.xml, which reads
+      the same values from pipeline secrets - see GitHub-Actions-README.md
+      and Azure-DevOps-README.md.
+  When you add a property here, add it to both of those as well.
   ============================================================================
 -->
 <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
