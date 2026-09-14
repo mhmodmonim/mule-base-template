@@ -1,0 +1,11 @@
+# Keeps the GitHub Actions used by .github/workflows current (security fixes,
+# runtime deprecations). Opens one grouped PR per week.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ['*']

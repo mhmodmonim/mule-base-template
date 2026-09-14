@@ -1,51 +1,74 @@
-# ------------------------------------------------------------------------------ #
-# Java defaults (https://github.com/github/gitignore/blob/master/Java.gitignore) #
-# ------------------------------------------------------------------------------ #
+# ---------------------------------------------------------------------------- #
+# Build output
+# ---------------------------------------------------------------------------- #
+target/
+.mule/
 *.class
-
-# Package Files #
 *.jar
 *.war
 *.ear
 
-# ------------------------------------------------------------------------------------------- #
-# Eclipse-specific (https://github.com/github/gitignore/blob/master/Global/Eclipse.gitignore) #
-# ------------------------------------------------------------------------------------------- #
-*.pydevproject
+# ---------------------------------------------------------------------------- #
+# Secrets - NEVER commit these
+# ---------------------------------------------------------------------------- #
+# Your real Maven settings, with credentials. Commit settings-template.xml only.
+settings.xml
+.mvn/settings.xml
+# Local property overrides, e.g. properties/dev-local.yaml
+**/*-local.yaml
+**/*-local.properties
+# Keystores / truststores / certificates
+src/main/resources/tls/
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+
+# ---------------------------------------------------------------------------- #
+# Anypoint Studio / Eclipse
+# ---------------------------------------------------------------------------- #
+.settings/
+.project
+.classpath
+.loadpath
 .metadata
+.externalToolBuilders/
+*.launch
+*.pydevproject
+.cproject
+.buildpath
+local.properties
 bin/**
 tmp/**
-tmp/**/*
 *.tmp
 *.bak
 *.swp
 *~.nib
-local.properties
-.settings/
-.loadpath
-.project
-.classpath
-
-# External tool builders
-.externalToolBuilders/
-
-# Locally stored "Eclipse launch configurations"
-*.launch
-
-# CDT-specific
-.cproject
-
-# PDT-specific
-.buildpath
-
-# --------------- #
-# Studio-specific #
-# --------------- #
-target/
-.mule/
-.DS_Store
 velocity.log
+mule_ee.log
 
+# ---------------------------------------------------------------------------- #
+# IntelliJ IDEA
+# ---------------------------------------------------------------------------- #
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
 
-#Vs Code specific
+# ---------------------------------------------------------------------------- #
+# VS Code
+# ---------------------------------------------------------------------------- #
 .vscode/
+
+# ---------------------------------------------------------------------------- #
+# OS
+# ---------------------------------------------------------------------------- #
+.DS_Store
+Thumbs.db
+desktop.ini
+
+.tooling-project

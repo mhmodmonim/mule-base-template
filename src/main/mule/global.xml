@@ -1,15 +1,163 @@
 <?xml version="1.0" encoding="UTF-8"?>
-
-<mule xmlns:db="http://www.mulesoft.org/schema/mule/db"
-	xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
-	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
-	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core"
-	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
-	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
-http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd 
-http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd 
-http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:tls="http://www.mulesoft.org/schema/mule/tls"
+      xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/tls http://www.mulesoft.org/schema/mule/tls/current/mule-tls.xsd
 http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd">
-	<secure-properties:config name="Secure_Properties_Config" doc:name="Secure Properties Config" doc:id="e20d24b9-0115-4fb1-b407-0b8708aaac0d" file="${env}.yaml" key="${enc.key}" />
-	
+
+	<!--
+	  =========================================================================
+	  Property resolution
+	  =========================================================================
+	  `env` selects which properties/<env>.yaml is loaded.
+	  `enc.key` is the AES key used to decrypt ![...] values in that file.
+
+	  Both are declared here only as LOCAL DEVELOPMENT FALLBACKS. A system
+	  property always wins over a global-property, so every real deployment
+	  supplies them explicitly:
+
+	    Studio  : Run Configuration > Arguments > VM
+	              -Denv=dev -Denc.key=localDevOnlyKey0
+	    Maven   : -Denv=dev -Denc.key=****
+	    CloudHub: set as application properties (enc.key hidden via
+	              mule-artifact.json > secureProperties)
+
+	  Never put a real key here.
+	-->
+	<global-property name="env" value="dev" doc:name="Default environment"/>
+	<global-property name="enc.key" value="localDevOnlyKey0" doc:name="Local-only decryption key"/>
+
+	<!--
+	  Build metadata (artifactId, version, build timestamp, runtime version).
+	  Generated from src/main/build-info/build-info.properties by
+	  maven-resources-plugin, so app.version never has to be hand-edited.
+	-->
+	<configuration-properties file="build-info.properties" doc:name="Build Info"/>
+
+	<!--
+	  Configuration is deliberately split in two:
+
+	    properties/<env>.yaml         plain settings, no key needed
+	    properties/<env>-secure.yaml  secrets only, AES-decrypted with enc.key
+
+	  That keeps the encryption key's blast radius small, lets anyone read the
+	  configuration without it, and means a rotated key only touches one file
+	  per environment.
+
+	  Mule's YAML provider accepts STRING values only - quote everything,
+	  booleans and numbers included, or deployment fails.
+	-->
+	<configuration-properties file="properties/${env}.yaml" doc:name="Environment Properties"/>
+
+	<secure-properties:config name="Secure_Properties_Config"
+	                          doc:name="Secure Properties Config"
+	                          doc:id="e20d24b9-0115-4fb1-b407-0b8708aaac0d"
+	                          file="properties/${env}-secure.yaml"
+	                          key="${enc.key}"
+	                          encoding="UTF-8"/>
+
+	<!--
+	  =========================================================================
+	  Inbound HTTP
+	  =========================================================================
+	-->
+	<http:listener-config name="HTTP_Listener_config"
+	                      doc:name="HTTP Listener config"
+	                      basePath="${http.listener.basePath}">
+		<http:listener-connection host="${http.listener.host}"
+		                          port="${http.listener.port}"
+		                          connectionIdleTimeout="${http.listener.connectionIdleTimeout}"/>
+	</http:listener-config>
+
+	<!--
+	  HTTPS variant for hybrid / RTF / on-prem deployments, where TLS is NOT
+	  terminated in front of the app. Drop the keystore into
+	  src/main/resources/tls/, fill in http.tls.* in properties/<env>.yaml,
+	  then swap this config in for the one above (keep the same name).
+
+	<tls:context name="TLS_Context" doc:name="TLS Context">
+		<tls:key-store type="${http.tls.keystore.type}"
+		               path="${http.tls.keystore.path}"
+		               alias="${http.tls.keystore.alias}"
+		               keyPassword="${http.tls.keystore.keyPassword}"
+		               password="${http.tls.keystore.password}"/>
+	</tls:context>
+
+	<http:listener-config name="HTTP_Listener_config" basePath="${http.listener.basePath}">
+		<http:listener-connection host="${http.listener.host}"
+		                          port="${http.listener.port}"
+		                          protocol="HTTPS"
+		                          tlsContext="TLS_Context"
+		                          connectionIdleTimeout="${http.listener.connectionIdleTimeout}"/>
+	</http:listener-config>
+	-->
+
+	<!--
+	  =========================================================================
+	  Outbound HTTP
+	  =========================================================================
+	  Template for a downstream system. Copy the config + the matching
+	  backend.<name>.* block in properties/<env>.yaml for each backend, and
+	  rename both consistently. Delete this one if the API has no backend.
+	-->
+	<http:request-config name="Example_Backend_config"
+	                     doc:name="Example backend request config"
+	                     basePath="${backend.example.basePath}"
+	                     responseTimeout="${backend.example.responseTimeout}">
+		<http:request-connection protocol="${backend.example.protocol}"
+		                         host="${backend.example.host}"
+		                         port="${backend.example.port}">
+			<reconnection>
+				<reconnect frequency="${backend.example.reconnect.frequency}"
+				           count="${backend.example.reconnect.attempts}"/>
+			</reconnection>
+		</http:request-connection>
+		<http:default-headers>
+			<http:default-header key="x-correlation-id" value="#[vars.correlationId default correlationId]"/>
+		</http:default-headers>
+	</http:request-config>
+
+	<!--
+	  =========================================================================
+	  API Manager autodiscovery
+	  =========================================================================
+	  Uncomment once the API is registered in API Manager and `api.id` is
+	  supplied as an application property. `flowRef` must point at the flow
+	  that owns the HTTP listener.
+
+	  Requires xmlns:api-gateway="http://www.mulesoft.org/schema/mule/api-gateway"
+	  and its schemaLocation entry on the <mule> element above.
+
+	<api-gateway:autodiscovery apiId="${api.id}"
+	                           flowRef="main-flow"
+	                           ignoreBasePath="true"
+	                           doc:name="API Autodiscovery"/>
+	-->
+
+	<!--
+	  =========================================================================
+	  Database (optional)
+	  =========================================================================
+	  To enable: add mule-db-connector + your JDBC driver to pom.xml (see the
+	  commented dependencies there), uncomment the database.* block in
+	  properties/<env>.yaml, add xmlns:db + its schemaLocation above, then:
+
+	<db:config name="Example_Database_config" doc:name="Database Config">
+		<db:my-sql-connection host="${database.example.host}"
+		                      port="${database.example.port}"
+		                      user="${database.example.user}"
+		                      password="${database.example.password}"
+		                      database="${database.example.name}">
+			<db:pooling-profile minPoolSize="${database.example.pool.min}"
+			                    maxPoolSize="${database.example.pool.max}"/>
+		</db:my-sql-connection>
+	</db:config>
+	-->
+
 </mule>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!--
+	  =========================================================================
+	  Structured logging
+	  =========================================================================
+	  Every log line is a single JSON object so it can be parsed by Splunk /
+	  ELK / Anypoint Monitoring without a custom grok pattern.
+
+	  Payload logging is gated on the `logging.payloads` property, which is
+	  true only in dev. Turning it on in uat/prod will write customer data to
+	  disk — treat that as a deliberate, time-boxed decision.
+	  =========================================================================
+	-->
+
+	<sub-flow name="log-inbound-request-sub-flow" doc:name="log-inbound-request-sub-flow">
+		<logger level="INFO" category="api.inbound.request" doc:name="Log Request"
+		        message="#[output application/json --- {event: 'REQUEST_RECEIVED', correlationId: vars.correlationId default correlationId, application: p('app.name'), environment: p('env'), method: attributes.method default 'N/A', path: attributes.requestPath default 'N/A', queryParams: attributes.queryParams default {}, clientIp: attributes.headers['x-forwarded-for'] default (attributes.remoteAddress default 'N/A'), payload: if (p('logging.payloads') == 'true') (payload default null) else '(omitted)'}]"/>
+	</sub-flow>
+
+	<sub-flow name="log-outbound-response-sub-flow" doc:name="log-outbound-response-sub-flow">
+		<logger level="INFO" category="api.outbound.response" doc:name="Log Response"
+		        message="#[output application/json --- {event: 'RESPONSE_SENT', correlationId: vars.correlationId default correlationId, application: p('app.name'), environment: p('env'), httpStatus: vars.httpStatus default 200, durationMs: if (vars.startTimestamp?) ((now() as Number {unit: 'milliseconds'}) - (vars.startTimestamp as Number {unit: 'milliseconds'})) else null, payload: if (p('logging.payloads') == 'true') (payload default null) else '(omitted)'}]"/>
+	</sub-flow>
+
+	<!--
+	  Call this before/after any downstream invocation:
+	    <flow-ref name="log-checkpoint-sub-flow"/>
+	  after setting vars.checkpoint (a short label) and, optionally,
+	  vars.checkpointDetail.
+	-->
+	<sub-flow name="log-checkpoint-sub-flow" doc:name="log-checkpoint-sub-flow">
+		<logger level="INFO" category="api.checkpoint" doc:name="Log Checkpoint"
+		        message="#[output application/json --- {event: vars.checkpoint default 'CHECKPOINT', correlationId: vars.correlationId default correlationId, application: p('app.name'), environment: p('env'), detail: vars.checkpointDetail default null}]"/>
+	</sub-flow>
+
+</mule>

@@ -103,14 +103,18 @@ After installing, restart Jenkins when prompted.
 | -------------- | ------------------------------------------ |
 | Kind           | **Username with password**                 |
 | Scope          | Global                                     |
-| Username       | `<your Connected App Client ID>`           |
-| Password       | `<your Connected App Client Secret>`       |
+| Username       | `~~~Client~~~` (literal, for a connected app) |
+| Password       | `<clientId>~?~<clientSecret>`              |
 | ID             | `anypoint-connected-app`                   |
 | Description    | Anypoint Platform Connected App Credentials |
 
 4. Click **Create**.
 
-> **Important:** The credential ID **must** match `anypoint-connected-app` — this is the ID referenced in the Jenkinsfile.
+> **Important:** The credential ID **must** match `anypoint-connected-app` — it
+> is what the managed `settings.xml` binds to the `anypoint-exchange-v3` server.
+> This credential authenticates **dependency resolution and Exchange publishing**.
+> The *deployment* uses the `anypoint.connectedApp.*` Maven properties in the
+> same managed file (Section 4.3); both are needed.
 
 ### 4.3 Configure Managed Maven `settings.xml` (Config File Provider)
 
@@ -125,59 +129,60 @@ The Jenkinsfile uses the **Config File Provider** plugin to inject a managed `se
 | ID     | `maven-settings`   |
 | Name   | MuleSoft Maven Settings |
 
-4. Paste the following content:
+4. Paste the following content. The `<properties>` block is the part that is
+   easy to forget: `mule-maven-plugin` reads the connected-app credentials and
+   the encryption key from Maven properties, **not** from `<servers>`, so the
+   server-credentials mapping alone is not enough to deploy.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<settings>
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd">
     <servers>
         <server>
             <id>anypoint-exchange-v3</id>
-            <!-- credentials injected by Config File Provider -->
-        </server>
-        <server>
-            <id>mulesoft-releases</id>
-            <!-- credentials injected by Config File Provider -->
+            <!-- username/password injected by Config File Provider -->
         </server>
     </servers>
 
     <profiles>
         <profile>
-            <id>mulesoft</id>
-            <repositories>
-                <repository>
-                    <id>mulesoft-releases</id>
-                    <name>MuleSoft Releases</name>
-                    <url>https://repository.mulesoft.org/releases/</url>
-                </repository>
-                <repository>
-                    <id>anypoint-exchange-v3</id>
-                    <name>Anypoint Exchange V3</name>
-                    <url>https://maven.anypoint.mulesoft.com/api/v3/maven</url>
-                </repository>
-            </repositories>
-            <pluginRepositories>
-                <pluginRepository>
-                    <id>mulesoft-releases</id>
-                    <name>MuleSoft Releases</name>
-                    <url>https://repository.mulesoft.org/releases/</url>
-                </pluginRepository>
-            </pluginRepositories>
+            <id>anypoint-credentials</id>
+            <properties>
+                <!-- Consumed by <cloudhub2Deployment> in pom.xml -->
+                <anypoint.connectedApp.clientId>CONNECTED_APP_CLIENT_ID</anypoint.connectedApp.clientId>
+                <anypoint.connectedApp.clientSecret>CONNECTED_APP_CLIENT_SECRET</anypoint.connectedApp.clientSecret>
+
+                <!-- Decrypts ![...] values in properties/<env>-secure.yaml -->
+                <enc.key>SIXTEEN_CHAR_KEY</enc.key>
+
+                <!-- Only needed once API autodiscovery is enabled in global.xml -->
+                <api.id>API_INSTANCE_ID</api.id>
+                <anypoint.platform.client_id>PLATFORM_CLIENT_ID</anypoint.platform.client_id>
+                <anypoint.platform.client_secret>PLATFORM_CLIENT_SECRET</anypoint.platform.client_secret>
+            </properties>
         </profile>
     </profiles>
 
     <activeProfiles>
-        <activeProfile>mulesoft</activeProfile>
+        <activeProfile>anypoint-credentials</activeProfile>
     </activeProfiles>
 </settings>
 ```
+
+> The repository URLs are declared in `pom.xml`, so they do not need to be
+> repeated here. `settings-template.xml` in the repo root is the same file for
+> local development — keep the two in sync.
 
 5. Under **Server Credentials**, map each `<server>` ID to the Jenkins credential:
 
 | Server ID               | Credentials                |
 | ----------------------- | -------------------------- |
 | `anypoint-exchange-v3`  | `anypoint-connected-app`   |
-| `mulesoft-releases`     | `anypoint-connected-app`   |
+
+For a connected app, the credential's **username** is the literal string
+`~~~Client~~~` and the **password** is `<clientId>~?~<clientSecret>`.
 
 6. Click **Submit**.
 
@@ -281,86 +286,52 @@ Then in your GitHub repo:
 
 ## 7. Project File Structure
 
-Your MuleSoft project should look like this:
-
 ```
 my-mule-app/
-├── Jenkinsfile                  ← Pipeline definition (this file)
-├── pom.xml                      ← Maven POM with CloudHub deploy plugin config
+├── Jenkinsfile                       ← Pipeline definition
+├── pom.xml                           ← Deployment profiles: dev / test / uat / prod
+├── mule-artifact.json                ← Runtime + secureProperties declaration
+├── settings-template.xml             ← Local copy of the managed settings.xml
 ├── src/
 │   ├── main/
-│   │   ├── mule/               ← Mule XML flows
-│   │   └── resources/          ← Properties files
+│   │   ├── build-info/               ← Maven-filtered build metadata
+│   │   ├── mule/                     ← Flows (main, global, error handler, impl)
+│   │   └── resources/
+│   │       ├── api/                  ← RAML contract
+│   │       ├── properties/           ← <env>.yaml + <env>-secure.yaml
+│   │       └── log4j2.xml
 │   └── test/
-│       └── munit/              ← MUnit test suites
-└── mule-artifact.json
+│       ├── munit/                    ← MUnit suites, incl. api-e2e-test-suite.xml
+│       └── resources/log4j2-test.xml
+└── .github/pull_request_template.md
 ```
 
 ### Key `pom.xml` Configuration
 
-The Jenkinsfile activates a **Maven profile** per environment (`-P dev`, `-P staging`, `-P prod`). Your `pom.xml` must define these profiles with the corresponding deployment configuration.
-
-#### Deployment Plugin (shared configuration)
-
-```xml
-<plugin>
-    <groupId>org.mule.tools.maven</groupId>
-    <artifactId>mule-maven-plugin</artifactId>
-    <version>4.2.1</version>
-    <extensions>true</extensions>
-</plugin>
-```
-
-#### Environment Profiles
-
-Add a `<profiles>` section with one profile per environment. The Jenkinsfile invokes `mvn deploy -P<env>`, so the profile `<id>` must match:
+The Jenkinsfile activates one Maven profile per environment (`-Pdev`, `-Ptest`,
+`-Puat`, `-Pprod`). Unlike older layouts, the profiles here **only override
+Maven properties** — there is a single `mule-maven-plugin` configuration in
+`<build>` that consumes them:
 
 ```xml
-<profiles>
-    <profile>
-			<id>dev</id>
-			<build>
-				<plugins>
-					<plugin>
-						<groupId>org.apache.maven.plugins</groupId>
-						<artifactId>maven-clean-plugin</artifactId>
-						<version>3.2.0</version>
-					</plugin>
-					<plugin>
-						<groupId>org.mule.tools.maven</groupId>
-						<artifactId>mule-maven-plugin</artifactId>
-						<version>${mule.maven.plugin.version}</version>
-						<extensions>true</extensions>
-						<configuration>
-							<cloudhub2Deployment>
-								<applicationName>${project.artifactId}</applicationName>
-								<environment>Sandbox</environment>
-								<target>Cloudhub-US-East-2</target>
-								<replicas>1</replicas>
-								<vCores>0.1</vCores>
-								<properties>
-									<env>dev</env>
-									<api.id>${api.id}</api.id>
-									<enc.key>${enc.key}</enc.key>
-									<anypoint.platform.client_id>${anypoint.platform.client_id}</anypoint.platform.client_id>
-									<anypoint.platform.client_secret>${anypoint.platform.client_secret}</anypoint.platform.client_secret>
-								</properties>
-							</cloudhub2Deployment>
-						</configuration>
-					</plugin>
-				</plugins>
-			</build>
-		</profile>
-    <profile>
-        <!-- <id>staging</id> -->
-    </profile>
-    <profile>
-        <!-- <id>prod</id> -->
-    </profile>
-</profiles>
+<profile>
+    <id>uat</id>
+    <properties>
+        <deployment.env>uat</deployment.env>
+        <anypoint.environment>UAT</anypoint.environment>
+        <cloudhub.replicas>2</cloudhub.replicas>
+        <cloudhub.vCores>0.2</cloudhub.vCores>
+    </properties>
+</profile>
 ```
 
-> **Note:** The `connectedApp.clientId` and `connectedApp.clientSecret` properties are resolved from the managed `settings.xml` server credentials (see [Section 4.3](#43-configure-managed-maven-settingsxml-config-file-provider)).
+Adding an environment therefore means adding a profile plus the two matching
+files `src/main/resources/properties/<env>.yaml` and `<env>-secure.yaml`. There
+is no plugin configuration to duplicate.
+
+`<connectedAppClientId>` / `<connectedAppClientSecret>` in the shared
+`<cloudhub2Deployment>` block resolve from the managed `settings.xml`
+properties (see [Section 4.3](#43-configure-managed-maven-settingsxml-config-file-provider)).
 
 ---
 
@@ -368,44 +339,78 @@ Add a `<profiles>` section with one profile per environment. The Jenkinsfile inv
 
 ### Pipeline Flow
 
+The pipeline builds **once** and promotes that same artifact upward. Choosing
+`uat` deploys dev, then test, then uat — each followed by a smoke test against
+`/health-check`.
+
 ```
-┌─────────────────────┐
-│  Build & Unit Test   │  mvn clean package -s $MAVEN_SETTINGS -DskipMunitTests
-└─────────┬───────────┘
-          │
-┌─────────▼───────────┐
-│    MUnit Tests       │  mvn test -s $MAVEN_SETTINGS → JUnit + Coverage HTML
-└─────────┬───────────┘
-          │
-┌─────────▼───────────┐
-│   Deploy to Dev      │  Always runs (for any env choice)
-└─────────┬───────────┘
-          │
-┌─────────▼───────────┐
-│  Deploy to Staging   │  Runs if env = staging or prod
-└─────────┬───────────┘
-          │
-┌─────────▼───────────┐
-│  Approval Gate       │  Manual approval (prod only) — 24h timeout
-└─────────┬───────────┘
-          │
-┌─────────▼───────────┐
-│ Deploy to Production │  Runs if env = prod AND approved
-└─────────────────────┘
+┌──────────────────────┐
+│  Build               │  mvn clean package -DskipMunitTests
+└──────────┬───────────┘  archives target/*-mule-application.jar
+           │
+┌──────────▼───────────┐
+│  MUnit               │  mvn test -Dmunit.coverage.failBuild=<param>
+└──────────┬───────────┘  JUnit XML + coverage HTML
+           │
+┌──────────▼───────────┐
+│  Publish to Exchange │  optional (PUBLISH_TO_EXCHANGE)
+└──────────┬───────────┘
+           │
+┌──────────▼───────────┐
+│  Deploy dev  + smoke │  runs for every ENVIRONMENT choice
+└──────────┬───────────┘
+┌──────────▼───────────┐
+│  Deploy test + smoke │  runs if ENVIRONMENT is test, uat or prod
+└──────────┬───────────┘
+┌──────────▼───────────┐
+│  Deploy uat  + smoke │  runs if ENVIRONMENT is uat or prod
+└──────────┬───────────┘
+┌──────────▼───────────┐
+│  Approval gate       │  prod only — 24h timeout, `release-approvers`
+└──────────┬───────────┘
+┌──────────▼───────────┐
+│  Deploy prod + smoke │
+└──────────────────────┘
 ```
 
-### Key Behaviors
+### Parameters
 
-| Feature                   | Details                                                    |
-| ------------------------- | ---------------------------------------------------------- |
-| **Maven settings**        | Injected per-step via `configFileProvider` (`maven-settings`); auto-cleaned after each block |
-| **Credentials injection** | `ANYPOINT_CREDS_USR` / `ANYPOINT_CREDS_PSW` auto-created from `credentials()` |
-| **Maven profiles**        | Deploy uses `-P<env>` to activate the matching pom.xml profile (`dev`, `staging`, `prod`) |
-| **Retry on deploy**       | Each deploy retries up to 2 times on failure               |
-| **Concurrent builds**     | Disabled — only one build runs at a time                   |
-| **Timeout**               | 60 min total pipeline, 24 hours for prod approval          |
-| **Artifacts**             | JAR archived with fingerprint; `allowEmptyArchive: true` prevents build failure if no JAR |
-| **Test reports**          | JUnit XML + MUnit coverage HTML; `allowMissing: true` prevents build failure if report dir is absent |
+| Parameter             | Default | Effect |
+| --------------------- | ------- | ------ |
+| `ENVIRONMENT`         | `dev`   | Highest environment to promote to. Lower ones deploy first. |
+| `SKIP_TESTS`          | `false` | Skips the MUnit stage. Emergency hotfix only. |
+| `ENFORCE_COVERAGE`    | `true`  | Passes `-Dmunit.coverage.failBuild=true`, turning the coverage report into a gate. |
+| `PUBLISH_TO_EXCHANGE` | `false` | Also runs `mvn deploy` to publish the artifact to Exchange. |
+
+### Key Behaviours
+
+| Feature | Details |
+| ------- | ------- |
+| **Promotion order** | `envRank()` maps dev=1, test=2, uat=3, prod=4; a stage runs when the chosen target ranks at or above it. |
+| **Maven settings** | Injected per step by `withMavenSettings` (`configFileProvider`, file id `maven-settings`). |
+| **Skipping MUnit** | `-DskipMunitTests`. **`-DskipTests` does not skip MUnit** — that was a bug in the previous pipeline. |
+| **Local repo** | Pinned to `${WORKSPACE}/.m2repository` so concurrent jobs cannot corrupt a shared cache. |
+| **Smoke tests** | Each deploy is followed by a `GET /health-check` that must return 200 with `"status": "UP"`. Skipped with a message when `APP_BASE_URL_<ENV>` is not set. |
+| **Retry on deploy** | Each deploy retries up to 2 times; each smoke test up to 3. |
+| **Application name** | Comes from `cloudhub.appName` in `pom.xml` (`<artifactId>-<env>`, no suffix for prod), not from a Jenkins parameter — one source of truth. |
+| **Build name** | Set to `#<n> <artifact>:<version> -> <env>` so the build history is readable. |
+| **Concurrent builds** | Disabled. |
+| **Timeout** | 60 min pipeline, 24 h for the production approval. |
+
+### Smoke test configuration
+
+Set these as Jenkins global environment variables
+(**Manage Jenkins → System → Global properties → Environment variables**):
+
+| Name                | Example |
+| ------------------- | ------- |
+| `APP_BASE_URL_DEV`  | `https://my-app-dev.uk-e1.cloudhub.io/api` |
+| `APP_BASE_URL_TEST` | `https://my-app-test.uk-e1.cloudhub.io/api` |
+| `APP_BASE_URL_UAT`  | `https://my-app-uat.uk-e1.cloudhub.io/api` |
+| `APP_BASE_URL_PROD` | `https://my-app.uk-e1.cloudhub.io/api` |
+
+If a variable is absent the smoke test logs that it is skipping and the
+pipeline continues — so you can adopt them one environment at a time.
 
 ---
 
@@ -416,19 +421,23 @@ Add a `<profiles>` section with one profile per environment. The Jenkinsfile inv
 1. Open the pipeline job in Jenkins.
 2. Click **Build with Parameters**.
 3. Select:
-   - **ENVIRONMENT**: `dev` (start with dev for first test)
-   - **APP_NAME**: `my-mule-app` (or your app name)
+   - **ENVIRONMENT**: `dev` (start here for the first run)
+   - **SKIP_TESTS**: unchecked
+   - **ENFORCE_COVERAGE**: uncheck it for the first run — the untouched
+     template sits around 24% because most of the global error handler is
+     unreachable until you wire up real backends.
 4. Click **Build**.
 
 > **Note:** The first run will also register the parameters in Jenkins. If you don't see **Build with Parameters**, click **Build Now** once — it will fail but register the parameters for subsequent runs.
 
 ### Deploying Through Environments
 
-| Scenario         | ENVIRONMENT param | What happens                                    |
-| ---------------- | ----------------- | ----------------------------------------------- |
-| Dev only         | `dev`             | Build → Test → Deploy to Dev                    |
-| Up to Staging    | `staging`         | Build → Test → Deploy to Dev → Deploy to Staging |
-| Full Production  | `prod`            | Build → Test → Dev → Staging → Approval → Prod  |
+| Scenario        | ENVIRONMENT param | What happens                                            |
+| --------------- | ----------------- | ------------------------------------------------------- |
+| Dev only        | `dev`             | Build → MUnit → dev → smoke                             |
+| Up to Test      | `test`            | … → dev → smoke → test → smoke                          |
+| Up to UAT       | `uat`             | … → dev → test → uat, each smoke tested                 |
+| Full production | `prod`            | … → dev → test → uat → **approval** → prod → smoke      |
 
 ### Approving a Production Deployment
 
@@ -465,35 +474,34 @@ input message: "Deploy to PRODUCTION?", ok: 'Approve', submitter: 'admin,john,ja
 | `cleanWs` fails | Plugin missing | Install the **Workspace Cleanup** plugin |
 | `publishHTML` fails | Plugin or report missing | Install the **HTML Publisher** plugin; the Jenkinsfile uses `allowMissing: true` so a missing report dir will not fail the build |
 | MUnit coverage report empty | MUnit coverage not configured | Add `<coverage>` config in `pom.xml` under `munit-maven-plugin` |
-| Deploy succeeds but wrong env config | Maven profile mismatch | Ensure `pom.xml` has `<profile>` entries with `<id>dev</id>`, `<id>staging</id>`, `<id>prod</id>` matching the `-P<env>` flag |
+| Deploy succeeds but wrong env config | Maven profile mismatch | Ensure `pom.xml` has `<profile>` entries with `<id>dev</id>`, `<id>test</id>`, `<id>uat</id>`, `<id>prod</id>` matching the `-P<env>` flag |
+| MUnit runs even though tests were "skipped" | Used `-DskipTests` | MUnit's switch is `-DskipMunitTests`; `-DskipTests` only affects Surefire |
+| `Couldn't find configuration property value for key ${...}` | The property exists in `<env>.yaml` for one environment only | Every property must exist in all four `properties/<env>.yaml` files |
+| App deploys but returns 500 on every call | `enc.key` not passed, or a YAML value is unquoted | Mule's YAML provider accepts strings only — quote every value, booleans included |
+| Smoke test skipped | `APP_BASE_URL_<ENV>` not set | Add it under Manage Jenkins → System → Global properties |
 
-### Enabling MUnit Coverage in `pom.xml`
+### MUnit coverage
+
+Coverage is already configured in `pom.xml` and reported on every build. It is
+a **gate** only when `-Dmunit.coverage.failBuild=true`, which the Jenkinsfile
+passes from the `ENFORCE_COVERAGE` parameter:
 
 ```xml
-<plugin>
-    <groupId>com.mulesoft.munit.tools</groupId>
-    <artifactId>munit-maven-plugin</artifactId>
-    <version>3.2.1</version>
-    <executions>
-        <execution>
-            <id>test</id>
-            <phase>test</phase>
-            <goals>
-                <goal>test</goal>
-                <goal>coverage-report</goal>
-            </goals>
-        </execution>
-    </executions>
-    <configuration>
-        <coverage>
-            <runCoverage>true</runCoverage>
-            <formats>
-                <format>html</format>
-            </formats>
-        </coverage>
-    </configuration>
-</plugin>
+<coverage>
+    <runCoverage>true</runCoverage>
+    <failBuild>${munit.coverage.failBuild}</failBuild>
+    <requiredApplicationCoverage>${munit.coverage.application}</requiredApplicationCoverage>
+    <requiredResourceCoverage>${munit.coverage.resource}</requiredResourceCoverage>
+    <requiredFlowCoverage>${munit.coverage.flow}</requiredFlowCoverage>
+    <formats>
+        <format>html</format>
+        <format>console</format>
+    </formats>
+</coverage>
 ```
+
+Thresholds default to 70%. Raise or lower them via the `munit.coverage.*`
+properties rather than editing the plugin block.
 
 ### Checking Logs
 
@@ -510,7 +518,9 @@ input message: "Deploy to PRODUCTION?", ok: 'Approve', submitter: 'admin,john,ja
 - [ ] `anypoint-connected-app` credential created (Section 4.2)
 - [ ] Managed `settings.xml` created with ID `maven-settings` and server credentials mapped (Section 4.3)
 - [ ] Build agent has Java, Maven, Git, and the `mule-builder` label (Section 5)
-- [ ] `pom.xml` has Maven profiles for `dev`, `staging`, `prod` with deployment config (Section 7)
+- [ ] `pom.xml` has Maven profiles for `dev`, `test`, `uat`, `prod` (Section 7)
+- [ ] Managed `settings.xml` includes the `<properties>` block, not just `<servers>` (Section 4.3)
+- [ ] `APP_BASE_URL_<ENV>` set for the environments you want smoke tested (Section 8)
 - [ ] `Jenkinsfile` placed in repo root (no `.txt` extension)
 - [ ] Pipeline job created pointing to your repo (Section 6)
 - [ ] First build triggered to register parameters

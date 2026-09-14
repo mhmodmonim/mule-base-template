@@ -1,0 +1,35 @@
+# =============================================================================
+#  DEV secrets
+# =============================================================================
+#  Loaded by <secure-properties:config> in global.xml as
+#  properties/${env}-secure.yaml, and AES-decrypted with ${enc.key}.
+#
+#  ONLY secrets belong here. Everything non-sensitive lives in dev.yaml,
+#  which is loaded by <configuration-properties> and needs no key - so the
+#  encryption key's blast radius stays as small as possible.
+#
+#  Encrypt a value with the Anypoint Secure Properties Tool:
+#    java -cp secure-properties-tool.jar com.mulesoft.tools.SecurePropertiesTool \n#         string encrypt AES CBC <enc.key> <plaintext>
+#  then paste the result inside ![ ... ].
+#
+#  The placeholders below are plaintext so a fresh clone starts.
+#  Replace them before this reaches a shared environment.
+# =============================================================================
+
+# Keystore passwords for the commented-out HTTPS listener config in global.xml.
+http:
+  tls:
+    keystore:
+      password: "changeit"
+      keyPassword: "changeit"
+
+backend:
+  example:
+    auth:
+      clientId: "example-client-id"
+      clientSecret: "example-client-secret"
+
+# Uncomment together with the database block in dev.yaml.
+# database:
+#   example:
+#     password: "![REPLACE_WITH_ENCRYPTED_VALUE]"

@@ -1,22 +1,44 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
 
-<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
-	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
-	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="
-http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd">
-	<flow name="get:\health-check:">
-        <ee:transform doc:name="Set Response">
-            <ee:message>
-                <ee:set-payload><![CDATA[%dw 2.0
+	<!--
+	  GET /health-check
+
+	  Liveness probe. Load balancers, CloudHub and the CI/CD smoke test all hit
+	  this. Keep it dependency-free: no database calls, no downstream requests.
+	  A probe that fails because a backend is slow will take the whole
+	  application out of rotation for a problem it cannot fix.
+
+	  If you need a *readiness* check that does exercise dependencies, add a
+	  separate /ready resource rather than changing this one.
+	-->
+	<flow name="get:\health-check:Router" doc:name="get:\health-check:Router">
+		<ee:transform doc:name="Build Health Response">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---
 {
-  status: "UP",
-  "message": app.namm ++ " is alive and kicking"
+	status: "UP",
+	application: p('app.name'),
+	version: p('app.version'),
+	environment: p('env'),
+	timestamp: now() as String { format: "yyyy-MM-dd'T'HH:mm:ss'Z'" }
 }]]></ee:set-payload>
-            </ee:message>
-        </ee:transform>
-    </flow>
-	
-	</mule>
+			</ee:message>
+			<ee:variables>
+				<ee:set-variable variableName="httpStatus"><![CDATA[%dw 2.0
+output application/java
+---
+200]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+	</flow>
+
+</mule>

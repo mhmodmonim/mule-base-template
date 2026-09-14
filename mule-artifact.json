@@ -1,11 +1,13 @@
 {
-  "minMuleVersion": "4.11.0",
+  "minMuleVersion": "4.12.0",
   "javaSpecificationVersions": [
     "17"
   ],
-  "secureProperties" : [
-	  "enc.key",
-	  "anypoint.platform.client_id",
-	  "anypoint.platform.client_secret"
+  "secureProperties": [
+    "enc.key",
+    "api.id",
+    "anypoint.platform.client_id",
+    "anypoint.platform.client_secret",
+    "backend.example.auth.clientSecret"
   ]
 }

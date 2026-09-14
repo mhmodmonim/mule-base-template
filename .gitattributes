@@ -1,0 +1,17 @@
+# Normalise line endings so a Windows Studio checkout and a Linux CI agent
+# produce byte-identical files - Mule XML diffs are noisy enough already.
+* text=auto eol=lf
+
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+*.jar  binary
+*.jks  binary
+*.p12  binary
+*.png  binary
+*.gif  binary
+*.jpg  binary
+
+# Treat Mule config as XML for diff/merge purposes.
+*.xml  text diff=html

@@ -1,0 +1,13 @@
+{
+  "total": 1,
+  "limit": 25,
+  "offset": 0,
+  "items": [
+    {
+      "id": "ex-0001",
+      "name": "First example",
+      "description": "Placeholder record returned by the template.",
+      "createdAt": "2026-01-01T00:00:00Z"
+    }
+  ]
+}

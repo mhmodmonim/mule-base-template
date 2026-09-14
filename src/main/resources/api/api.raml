@@ -1,0 +1,102 @@
+#%RAML 1.0
+title: Mule API Base Template
+description: |
+  Starter API specification for new Mule applications.
+
+  Replace the `example` resource with your own resources, then re-scaffold the
+  implementation flows in Anypoint Studio (right-click the RAML > Mule > Generate Flows).
+  Keep `/health-check` — the platform and CI/CD probes depend on it.
+version: v1
+baseUri: https://{host}/api/{version}
+baseUriParameters:
+  host:
+    type: string
+    default: localhost:8081
+mediaType: application/json
+protocols: [ HTTP, HTTPS ]
+
+uses:
+  dataTypes: dataTypes/library.raml
+
+traits:
+  correlated: !include dataTypes/trait-correlated.raml
+
+/health-check:
+  displayName: Health Check
+  description: Liveness/readiness probe. Never put business logic or downstream calls here.
+  get:
+    is: [ correlated ]
+    displayName: Get health status
+    responses:
+      200:
+        body:
+          application/json:
+            type: dataTypes.HealthStatus
+            example: !include examples/health-check-200.json
+
+/example:
+  displayName: Example Resource
+  description: Placeholder resource — delete or rename when you start a real project.
+  get:
+    is: [ correlated ]
+    displayName: List examples
+    queryParameters:
+      limit:
+        type: integer
+        required: false
+        default: 25
+        minimum: 1
+        maximum: 100
+      offset:
+        type: integer
+        required: false
+        default: 0
+        minimum: 0
+    responses:
+      200:
+        body:
+          application/json:
+            type: dataTypes.ExampleCollection
+            example: !include examples/example-collection-200.json
+      500:
+        body:
+          application/json:
+            type: dataTypes.ErrorResponse
+            example: !include examples/error-500.json
+  post:
+    is: [ correlated ]
+    displayName: Create example
+    body:
+      application/json:
+        type: dataTypes.ExampleRequest
+        example: !include examples/example-request.json
+    responses:
+      201:
+        body:
+          application/json:
+            type: dataTypes.Example
+            example: !include examples/example-201.json
+      400:
+        body:
+          application/json:
+            type: dataTypes.ErrorResponse
+            example: !include examples/error-400.json
+  /{exampleId}:
+    uriParameters:
+      exampleId:
+        type: string
+        pattern: "^[A-Za-z0-9-]{1,64}$"
+    get:
+      is: [ correlated ]
+      displayName: Get example by id
+      responses:
+        200:
+          body:
+            application/json:
+              type: dataTypes.Example
+              example: !include examples/example-201.json
+        404:
+          body:
+            application/json:
+              type: dataTypes.ErrorResponse
+              example: !include examples/error-404.json

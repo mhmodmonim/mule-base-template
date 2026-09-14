@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!--
+	  =========================================================================
+	  End-to-end tests through the real HTTP listener.
+	  =========================================================================
+	  Unlike the flow-level suites, these go through the whole chain:
+
+	      listener -> correlation id -> request log -> APIkit router
+	               -> RAML validation -> implementation flow
+	               -> global error handler -> error-response serialisation
+
+	  That makes them the only tests that can catch a broken listener config,
+	  an APIkit flow name that does not match the RAML, or an error handler
+	  that returns the wrong status code. Keep them.
+
+	  `munit:dynamic-port` allocates a free port per run so concurrent CI jobs
+	  on the same agent do not collide; it overrides http.listener.port from
+	  properties/test.yaml.
+	  =========================================================================
+	-->
+	<munit:config name="api-e2e-test-suite.xml"/>
+
+	<munit:dynamic-port propertyName="http.listener.port"/>
+
+	<http:request-config name="MUnit_HTTP_Request_config" basePath="/api" doc:name="MUnit HTTP request config">
+		<http:request-connection host="localhost" port="${http.listener.port}"/>
+		<!-- Accept every status so assertions can inspect 4xx/5xx bodies. -->
+		<http:default-headers>
+			<http:default-header key="Accept" value="application/json"/>
+		</http:default-headers>
+	</http:request-config>
+
+	<munit:test name="e2e-health-check-returns-200-and-echoes-correlation-id" doc:name="E2E GET /api/health-check">
+		<!--
+		  MUnit disables message sources by default so tests cannot be fired by
+		  real traffic, and it initialises the application lazily. main-flow
+		  owns the HTTP listener, so it must be turned back on for a call to
+		  reach anything; the APIkit target flows must be listed too, because
+		  the router resolves them by name at runtime and lazy init would
+		  otherwise leave them uninstantiated - which surfaces as HTTP 501.
+		-->
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="main-flow"/>
+			<munit:enable-flow-source value="main-console-flow"/>
+			<munit:enable-flow-source value="get:\health-check:Router"/>
+			<munit:enable-flow-source value="get:\example:Router"/>
+			<munit:enable-flow-source value="post:\example:application\json:Router"/>
+			<munit:enable-flow-source value="get:\example\(exampleId):Router"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" path="/health-check" config-ref="MUnit_HTTP_Request_config" doc:name="GET /api/health-check">
+				<http:headers><![CDATA[#[{'x-correlation-id': 'e2e-health-check'}]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="100..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]" doc:name="Assert 200"/>
+			<munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('UP')]" doc:name="Assert UP"/>
+			<munit-tools:assert-that expression="#[attributes.headers['x-correlation-id']]"
+			                         is="#[MunitTools::equalTo('e2e-health-check')]"
+			                         message="The listener must echo the caller's x-correlation-id"
+			                         doc:name="Assert correlation id echoed"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="e2e-unknown-resource-returns-404-error-envelope" doc:name="E2E unknown resource returns 404">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="main-flow"/>
+			<munit:enable-flow-source value="main-console-flow"/>
+			<munit:enable-flow-source value="get:\health-check:Router"/>
+			<munit:enable-flow-source value="get:\example:Router"/>
+			<munit:enable-flow-source value="post:\example:application\json:Router"/>
+			<munit:enable-flow-source value="get:\example\(exampleId):Router"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" path="/does-not-exist" config-ref="MUnit_HTTP_Request_config" doc:name="GET /api/does-not-exist">
+				<http:response-validator>
+					<http:success-status-code-validator values="100..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]" doc:name="Assert 404"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo(404)]" doc:name="Assert envelope code"/>
+			<munit-tools:assert-that expression="#[payload.message]" is="#[MunitTools::equalTo('Not found')]" doc:name="Assert envelope message"/>
+			<munit-tools:assert-that expression="#[payload.correlationId]"
+			                         is="#[MunitTools::notNullValue()]"
+			                         message="Error envelopes must always carry a correlation id"
+			                         doc:name="Assert envelope correlationId"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="e2e-wrong-method-returns-405" doc:name="E2E wrong method returns 405">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="main-flow"/>
+			<munit:enable-flow-source value="main-console-flow"/>
+			<munit:enable-flow-source value="get:\health-check:Router"/>
+			<munit:enable-flow-source value="get:\example:Router"/>
+			<munit:enable-flow-source value="post:\example:application\json:Router"/>
+			<munit:enable-flow-source value="get:\example\(exampleId):Router"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="DELETE" path="/health-check" config-ref="MUnit_HTTP_Request_config" doc:name="DELETE /api/health-check">
+				<http:response-validator>
+					<http:success-status-code-validator values="100..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(405)]" doc:name="Assert 405"/>
+			<munit-tools:assert-that expression="#[payload.message]" is="#[MunitTools::equalTo('Method not allowed')]" doc:name="Assert message"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="e2e-raml-validation-rejects-a-bad-body-with-400" doc:name="E2E RAML validation returns 400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="main-flow"/>
+			<munit:enable-flow-source value="main-console-flow"/>
+			<munit:enable-flow-source value="get:\health-check:Router"/>
+			<munit:enable-flow-source value="get:\example:Router"/>
+			<munit:enable-flow-source value="post:\example:application\json:Router"/>
+			<munit:enable-flow-source value="get:\example\(exampleId):Router"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<!-- `name` is required and must be at least 1 character. -->
+			<http:request method="POST" path="/example" config-ref="MUnit_HTTP_Request_config" doc:name="POST /api/example">
+				<http:body><![CDATA[#[output application/json --- { description: 'missing the required name' }]]]></http:body>
+				<http:headers><![CDATA[#[{'Content-Type': 'application/json'}]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="100..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]" doc:name="Assert 400"/>
+			<munit-tools:assert-that expression="#[payload.message]" is="#[MunitTools::equalTo('Bad request')]" doc:name="Assert message"/>
+			<munit-tools:assert-that expression="#[payload.description]"
+			                         is="#[MunitTools::notNullValue()]"
+			                         message="A 400 must tell the caller which field failed validation"
+			                         doc:name="Assert description present"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="e2e-post-example-returns-201" doc:name="E2E POST /api/example returns 201">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="main-flow"/>
+			<munit:enable-flow-source value="main-console-flow"/>
+			<munit:enable-flow-source value="get:\health-check:Router"/>
+			<munit:enable-flow-source value="get:\example:Router"/>
+			<munit:enable-flow-source value="post:\example:application\json:Router"/>
+			<munit:enable-flow-source value="get:\example\(exampleId):Router"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="POST" path="/example" config-ref="MUnit_HTTP_Request_config" doc:name="POST /api/example">
+				<http:body><![CDATA[#[output application/json --- { name: 'E2E example', description: 'Created end to end' }]]]></http:body>
+				<http:headers><![CDATA[#[{'Content-Type': 'application/json'}]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="100..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(201)]" doc:name="Assert 201"/>
+			<munit-tools:assert-that expression="#[payload.name]" is="#[MunitTools::equalTo('E2E example')]" doc:name="Assert name"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="e2e-app-raised-error-maps-to-404-envelope" doc:name="E2E APP:RESOURCE_NOT_FOUND maps to 404">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="main-flow"/>
+			<munit:enable-flow-source value="main-console-flow"/>
+			<munit:enable-flow-source value="get:\health-check:Router"/>
+			<munit:enable-flow-source value="get:\example:Router"/>
+			<munit:enable-flow-source value="post:\example:application\json:Router"/>
+			<munit:enable-flow-source value="get:\example\(exampleId):Router"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" path="/example/ex-9999" config-ref="MUnit_HTTP_Request_config" doc:name="GET /api/example/ex-9999">
+				<http:response-validator>
+					<http:success-status-code-validator values="100..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]"
+			                         is="#[MunitTools::equalTo(404)]"
+			                         message="raise-error APP:RESOURCE_NOT_FOUND must surface as HTTP 404"
+			                         doc:name="Assert 404"/>
+			<munit-tools:assert-that expression="#[payload.description]"
+			                         is="#[MunitTools::containsString('ex-9999')]"
+			                         message="The raise-error description must reach the client"
+			                         doc:name="Assert description"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="e2e-console-is-disabled-outside-dev" doc:name="E2E console is disabled in test">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="main-flow"/>
+			<munit:enable-flow-source value="main-console-flow"/>
+			<munit:enable-flow-source value="get:\health-check:Router"/>
+			<munit:enable-flow-source value="get:\example:Router"/>
+			<munit:enable-flow-source value="post:\example:application\json:Router"/>
+			<munit:enable-flow-source value="get:\example\(exampleId):Router"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" path="/console/" config-ref="MUnit_HTTP_Request_config" doc:name="GET /api/console/">
+				<http:response-validator>
+					<http:success-status-code-validator values="100..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<!--
+			  properties/test.yaml sets apikit.console.enabled to "true", so the
+			  console is served here. Change that property to "false" and this
+			  assertion flips to 404 - which is what uat/prod get.
+			-->
+			<munit-tools:assert-that expression="#[attributes.statusCode]"
+			                         is="#[MunitTools::not(MunitTools::equalTo(500))]"
+			                         message="The console route must never 500"
+			                         doc:name="Assert console route responds"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

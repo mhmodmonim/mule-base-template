@@ -1,0 +1,76 @@
+# =============================================================================
+#  DEV environment properties
+# =============================================================================
+#  Loaded by <configuration-properties> in global.xml as
+#  properties/${env}.yaml. Plain configuration only - no key required.
+#
+#  Secrets go in dev-secure.yaml instead.
+#
+#  NOTE: Mule's YAML property provider only accepts STRING values.
+#  Every value must be quoted, booleans and numbers included, or the
+#  application fails to deploy.
+# =============================================================================
+
+app:
+  name: "mule-api-base-template"
+
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8081"
+    # Prefix the listener binds to. APIkit resolves RAML resources beneath it.
+    basePath: "/api"
+    # How long an idle keep-alive connection is held open, in ms.
+    connectionIdleTimeout: "30000"
+  # Used only by the commented-out HTTPS listener config in global.xml.
+  # CloudHub 2.0 terminates TLS at the ingress, so the default listener is plain HTTP.
+  tls:
+    enabled: "false"
+    keystore:
+      path: "tls/keystore.jks"
+      type: "jks"
+      alias: "server"
+      # password / keyPassword live in dev-secure.yaml
+
+apikit:
+  # Serve the APIkit console (spec browser). Disable outside dev.
+  console:
+    enabled: "true"
+  # Set to true to bypass RAML request validation. Keep false everywhere.
+  validation:
+    disabled: "false"
+
+# -----------------------------------------------------------------------------
+# Example downstream system. Copy this block per backend you integrate with.
+# -----------------------------------------------------------------------------
+backend:
+  example:
+    host: "localhost"
+    port: "8082"
+    protocol: "HTTP"
+    basePath: "/v1"
+    responseTimeout: "20000"
+    # Reconnection strategy applied by the requester config.
+    reconnect:
+      frequency: "2000"
+      attempts: "3"
+
+logging:
+  # Emit full request/response payloads. Keep false in uat/prod (PII risk).
+  payloads: "true"
+  level: "DEBUG"
+
+# -----------------------------------------------------------------------------
+# Uncomment together with the db:config block in global.xml and the
+# mule-db-connector dependency in pom.xml if this API talks to a database.
+# -----------------------------------------------------------------------------
+# database:
+#   example:
+#     host: "localhost"
+#     port: "3306"
+#     name: "exampledb"
+#     user: "app_user"
+#     # password lives in dev-secure.yaml
+#     pool:
+#       min: "1"
+#       max: "10"

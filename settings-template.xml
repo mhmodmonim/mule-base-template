@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+  Maven settings template
+  ============================================================================
+  Copy this file to ~/.m2/settings.xml (or pass it with -s) and fill in the
+  placeholders. It is NOT read from the project directory automatically.
+
+      cp settings-template.xml ~/.m2/settings.xml
+
+  settings.xml is in .gitignore precisely so a filled-in copy can never be
+  committed by accident. Keep it that way.
+
+  Authentication uses a CONNECTED APP, not a username and password:
+    Anypoint Platform > Access Management > Connected Apps > Create app
+      - App acts on its own behalf (client credentials)
+      - Scopes: Exchange Contributor, Design Center Developer,
+                Runtime Manager (Create/Read/Update Applications),
+                and the environments you deploy to.
+
+  In Jenkins this file is provided by the Config File Provider plugin as the
+  `maven-settings` config file - see Jenkins-README.md.
+  ============================================================================
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd">
+
+	<servers>
+		<!--
+		  Pulling dependencies FROM Exchange and publishing TO it both
+		  authenticate against this server id, which must match the
+		  <repository> and <distributionManagement> ids in pom.xml.
+		  Use a connected app: username is the literal '~~~Client~~~'.
+		-->
+		<server>
+			<id>anypoint-exchange-v3</id>
+			<username>~~~Client~~~</username>
+			<password>CONNECTED_APP_CLIENT_ID~?~CONNECTED_APP_CLIENT_SECRET</password>
+		</server>
+	</servers>
+
+	<profiles>
+		<!--
+		  Always active: credentials and keys the build needs regardless of
+		  which deployment profile (-Pdev / -Ptest / -Puat / -Pprod) is used.
+		-->
+		<profile>
+			<id>anypoint-credentials</id>
+			<properties>
+				<!-- Connected app used by mule-maven-plugin to deploy. -->
+				<anypoint.connectedApp.clientId>CONNECTED_APP_CLIENT_ID</anypoint.connectedApp.clientId>
+				<anypoint.connectedApp.clientSecret>CONNECTED_APP_CLIENT_SECRET</anypoint.connectedApp.clientSecret>
+
+				<!-- AES key that decrypts ![...] values in properties/<env>-secure.yaml. -->
+				<enc.key>SIXTEEN_CHAR_KEY</enc.key>
+
+				<!-- API Manager instance id, only needed once autodiscovery is enabled. -->
+				<api.id>API_INSTANCE_ID</api.id>
+
+				<!-- Client id/secret enforced by the API Manager policy, if any. -->
+				<anypoint.platform.client_id>PLATFORM_CLIENT_ID</anypoint.platform.client_id>
+				<anypoint.platform.client_secret>PLATFORM_CLIENT_SECRET</anypoint.platform.client_secret>
+			</properties>
+		</profile>
+	</profiles>
+
+	<activeProfiles>
+		<activeProfile>anypoint-credentials</activeProfile>
+	</activeProfiles>
+</settings>

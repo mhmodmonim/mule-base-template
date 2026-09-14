@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!--
+	  Tests for the reference /example implementation. Delete alongside
+	  src/main/mule/implementation/example.xml when you start a real project,
+	  but keep the shape: one suite file per implementation file.
+	-->
+	<munit:config name="example-test-suite.xml"/>
+
+	<munit:test name="get-example-returns-collection-with-paging-echoed" doc:name="GET /example returns a collection">
+		<munit:behavior>
+			<munit:set-event doc:name="Set query params">
+				<munit:attributes value="#[{ queryParams: { limit: '10', offset: '5' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="get:\example:Router" doc:name="Call GET /example"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(200)]" doc:name="Assert 200"/>
+			<munit-tools:assert-that expression="#[payload.limit]" is="#[MunitTools::equalTo(10)]"
+			                         message="limit query param must be echoed as a number" doc:name="Assert limit"/>
+			<munit-tools:assert-that expression="#[payload.offset]" is="#[MunitTools::equalTo(5)]"
+			                         message="offset query param must be echoed as a number" doc:name="Assert offset"/>
+			<munit-tools:assert-that expression="#[sizeOf(payload.items)]" is="#[MunitTools::greaterThan(0)]" doc:name="Assert items"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="get-example-applies-paging-defaults-when-params-absent" doc:name="GET /example applies paging defaults">
+		<munit:behavior>
+			<munit:set-event doc:name="Set empty attributes">
+				<munit:attributes value="#[{ queryParams: {} }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="get:\example:Router" doc:name="Call GET /example"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[payload.limit]" is="#[MunitTools::equalTo(25)]" doc:name="Assert default limit"/>
+			<munit-tools:assert-that expression="#[payload.offset]" is="#[MunitTools::equalTo(0)]" doc:name="Assert default offset"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="post-example-returns-201-and-echoes-body" doc:name="POST /example returns 201">
+		<munit:behavior>
+			<munit:set-event doc:name="Set request body">
+				<munit:payload value="#[output application/json --- { name: 'A new example', description: 'Created by MUnit' }]"
+				               mediaType="application/json"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="post:\example:application\json:Router" doc:name="Call POST /example"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(201)]" doc:name="Assert 201"/>
+			<munit-tools:assert-that expression="#[payload.name]" is="#[MunitTools::equalTo('A new example')]" doc:name="Assert name"/>
+			<munit-tools:assert-that expression="#[payload.id]" is="#[MunitTools::startsWith('ex-')]" doc:name="Assert generated id"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="post-example-raises-APP-VALIDATION-for-reserved-name"
+	            expectedErrorType="APP:VALIDATION"
+	            doc:name="POST /example rejects a reserved name">
+		<munit:behavior>
+			<munit:set-event doc:name="Set reserved name">
+				<munit:payload value="#[output application/json --- { name: 'forbidden' }]" mediaType="application/json"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="post:\example:application\json:Router" doc:name="Call POST /example"/>
+		</munit:execution>
+	</munit:test>
+
+	<munit:test name="get-example-by-id-returns-the-record" doc:name="GET /example/{id} returns the record">
+		<munit:behavior>
+			<munit:set-event doc:name="Set uri params">
+				<munit:attributes value="#[{ uriParams: { exampleId: 'ex-0001' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="get:\example\(exampleId):Router" doc:name="Call GET /example/ex-0001"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(200)]" doc:name="Assert 200"/>
+			<munit-tools:assert-that expression="#[payload.id]" is="#[MunitTools::equalTo('ex-0001')]" doc:name="Assert id"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="get-example-by-id-raises-APP-RESOURCE_NOT_FOUND-for-unknown-id"
+	            expectedErrorType="APP:RESOURCE_NOT_FOUND"
+	            doc:name="GET /example/{id} 404s on an unknown id">
+		<munit:behavior>
+			<munit:set-event doc:name="Set unknown id">
+				<munit:attributes value="#[{ uriParams: { exampleId: 'ex-9999' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="get:\example\(exampleId):Router" doc:name="Call GET /example/ex-9999"/>
+		</munit:execution>
+	</munit:test>
+
+</mule>

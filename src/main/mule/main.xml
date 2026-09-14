@@ -1,10 +1,108 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd ">
-    <apikit:config outboundHeadersMapName="outboundHeadersMapName" httpStatusVarName="httpStatus" doc:name="Router" doc:id="8200dc15-2b9e-4c84-9ced-93e47b8d1ab6" name="Router" api="example" />
-	<flow name="placeholder-flow">
-        <set-variable value="#[attributes.headers.'x-correlation-id' default uuid()]" doc:name="Set Correlation ID" doc:id="02b6b8a2-632e-47b0-a151-51c839263a28" variableName="correlationId"/>
-        <apikit:router doc:name="Placeholder" doc:id="e06f1236-6cc9-4faf-900b-503b3d46d5f2" config-ref="Router"/>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!--
+	  APIkit router. `httpStatusVarName` / `outboundHeadersMapName` name the
+	  variables the router (and the global error handler) write to; the HTTP
+	  listener below reads them back when building the response.
+	-->
+	<apikit:config name="Router"
+	               doc:name="Router"
+	               doc:id="8200dc15-2b9e-4c84-9ced-93e47b8d1ab6"
+	               api="api/api.raml"
+	               outboundHeadersMapName="outboundHeaders"
+	               httpStatusVarName="httpStatus"
+	               disableValidations="${apikit.validation.disabled}"/>
+
+	<!--
+	  =========================================================================
+	  Main flow — the single entry point for the API.
+	  =========================================================================
+	  Implementation flows live under src/main/mule/implementation/ and are
+	  reached by the router via the RAML-derived flow names
+	  (e.g. get:\health-check:Router). Do not add business logic here.
+	-->
+	<flow name="main-flow" doc:name="main-flow" doc:id="0d0a2f21-1f3a-4e0c-9a2f-6f1a6b0a01aa">
+		<http:listener config-ref="HTTP_Listener_config" path="/*" doc:name="HTTP Listener">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers><![CDATA[#[(vars.outboundHeaders default {}) ++ {'x-correlation-id': vars.correlationId default correlationId}]]]></http:headers>
+			</http:response>
+			<http:error-response statusCode="#[vars.httpStatus default 500]">
+				<http:body><![CDATA[#[payload]]]></http:body>
+				<http:headers><![CDATA[#[(vars.outboundHeaders default {}) ++ {'x-correlation-id': vars.correlationId default correlationId}]]]></http:headers>
+			</http:error-response>
+		</http:listener>
+
+		<ee:transform doc:name="Init Transaction Context" doc:id="02b6b8a2-632e-47b0-a151-51c839263a28">
+			<ee:variables>
+				<ee:set-variable variableName="correlationId"><![CDATA[%dw 2.0
+output application/java
+---
+attributes.headers['x-correlation-id'] default correlationId]]></ee:set-variable>
+				<ee:set-variable variableName="startTimestamp"><![CDATA[%dw 2.0
+output application/java
+---
+now()]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+		<flow-ref name="log-inbound-request-sub-flow" doc:name="Log Inbound Request"/>
+		<apikit:router config-ref="Router" doc:name="APIkit Router" doc:id="e06f1236-6cc9-4faf-900b-503b3d46d5f2"/>
+		<flow-ref name="log-outbound-response-sub-flow" doc:name="Log Outbound Response"/>
+
 		<error-handler ref="global-error-handler"/>
-    </flow>
+	</flow>
+
+	<!--
+	  =========================================================================
+	  APIkit console — browsable API reference at <basePath>/console/
+	  =========================================================================
+	  Gated on apikit.console.enabled so it can be switched off per environment
+	  without touching the XML. It is disabled in uat/prod by default.
+	-->
+	<flow name="main-console-flow" doc:name="main-console-flow" doc:id="0d0a2f21-1f3a-4e0c-9a2f-6f1a6b0a02bb">
+		<http:listener config-ref="HTTP_Listener_config" path="/console/*" doc:name="HTTP Listener">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers><![CDATA[#[vars.outboundHeaders default {}]]]></http:headers>
+			</http:response>
+			<http:error-response statusCode="#[vars.httpStatus default 500]">
+				<http:body><![CDATA[#[payload]]]></http:body>
+				<http:headers><![CDATA[#[vars.outboundHeaders default {}]]]></http:headers>
+			</http:error-response>
+		</http:listener>
+		<choice doc:name="Console enabled?">
+			<when expression="#[p('apikit.console.enabled') == 'true']">
+				<apikit:console config-ref="Router" doc:name="APIkit Console"/>
+			</when>
+			<otherwise>
+				<set-variable variableName="httpStatus" value="#[404]" doc:name="Set HTTP Status - 404"/>
+				<ee:transform doc:name="Console Disabled Response">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	code: 404,
+	message: "Not found",
+	description: "The API console is disabled in this environment",
+	dateTime: now() as String { format: "yyyy-MM-dd'T'HH:mm:ss'Z'" },
+	correlationId: correlationId
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+		<error-handler ref="global-error-handler"/>
+	</flow>
 
 </mule>

@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!--
+	  =========================================================================
+	  Reference implementation for the /example resource.
+	  =========================================================================
+	  Delete this file (and the /example resource in api/api.raml) when you
+	  start a real project. It exists to demonstrate the conventions the rest
+	  of the template assumes:
+
+	    * Flow names are APIkit-generated: <method>:\<resource>:<config>
+	      and <method>:\<resource>:<mediaType>:<config> when there is a body.
+	    * Implementation flows never define their own error handler - errors
+	      propagate to main-flow's global-error-handler.
+	    * Business failures use <raise-error type="APP:..."/>, which the
+	      global error handler maps to a status code and JSON envelope.
+	    * The response status is set on vars.httpStatus, which the listener in
+	      main.xml reads. Never set it on the message.
+	  =========================================================================
+	-->
+
+	<flow name="get:\example:Router" doc:name="get:\example:Router">
+		<ee:transform doc:name="Read Query Params">
+			<ee:variables>
+				<ee:set-variable variableName="limit"><![CDATA[%dw 2.0
+output application/java
+---
+(attributes.queryParams.limit default "25") as Number]]></ee:set-variable>
+				<ee:set-variable variableName="offset"><![CDATA[%dw 2.0
+output application/java
+---
+(attributes.queryParams.offset default "0") as Number]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+		<!-- Replace with a real lookup, e.g. <db:select> or <http:request>. -->
+		<ee:transform doc:name="Build Collection Response">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	total: 1,
+	limit: vars.limit,
+	offset: vars.offset,
+	items: [
+		{
+			id: "ex-0001",
+			name: "First example",
+			description: "Placeholder record returned by the template.",
+			createdAt: now() as String { format: "yyyy-MM-dd'T'HH:mm:ss'Z'" }
+		}
+	]
+}]]></ee:set-payload>
+			</ee:message>
+			<ee:variables>
+				<ee:set-variable variableName="httpStatus"><![CDATA[%dw 2.0
+output application/java
+---
+200]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+	</flow>
+
+	<flow name="post:\example:application\json:Router" doc:name="post:\example:application\json:Router">
+		<!--
+		  RAML validation has already enforced the schema by this point. Only
+		  business rules that the spec cannot express belong here.
+		-->
+		<choice doc:name="Business Validation">
+			<when expression='#[(payload.name default "") == "forbidden"]'>
+				<raise-error type="APP:VALIDATION" description="name 'forbidden' is reserved" doc:name="Raise APP:VALIDATION"/>
+			</when>
+		</choice>
+
+		<ee:transform doc:name="Build Created Response">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	id: "ex-" ++ (uuid()[0 to 7]),
+	name: payload.name,
+	description: payload.description,
+	createdAt: now() as String { format: "yyyy-MM-dd'T'HH:mm:ss'Z'" }
+}]]></ee:set-payload>
+			</ee:message>
+			<ee:variables>
+				<ee:set-variable variableName="httpStatus"><![CDATA[%dw 2.0
+output application/java
+---
+201]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+	</flow>
+
+	<flow name="get:\example\(exampleId):Router" doc:name="get:\example\(exampleId):Router">
+		<set-variable variableName="exampleId" value="#[attributes.uriParams.exampleId]" doc:name="Set exampleId"/>
+
+		<!-- Demonstrates the 404 path: anything other than ex-0001 does not exist. -->
+		<choice doc:name="Record Exists?">
+			<when expression='#[vars.exampleId == "ex-0001"]'>
+				<ee:transform doc:name="Build Response">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	id: vars.exampleId,
+	name: "First example",
+	description: "Placeholder record returned by the template.",
+	createdAt: now() as String { format: "yyyy-MM-dd'T'HH:mm:ss'Z'" }
+}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables>
+						<ee:set-variable variableName="httpStatus"><![CDATA[%dw 2.0
+output application/java
+---
+200]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</when>
+			<otherwise>
+				<raise-error type="APP:RESOURCE_NOT_FOUND" description="#['Example ' ++ vars.exampleId ++ ' does not exist']" doc:name="Raise APP:RESOURCE_NOT_FOUND"/>
+			</otherwise>
+		</choice>
+	</flow>
+
+</mule>

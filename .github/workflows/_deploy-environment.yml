@@ -1,0 +1,73 @@
+# =============================================================================
+#  Reusable: deploy the application to ONE environment, then smoke test it.
+# =============================================================================
+#  Called by deploy.yml once per environment. Not meant to be run directly.
+#
+#  The job binds to the GitHub Environment named after inputs.environment.
+#  That binding is what:
+#    * applies the environment's protection rules (required reviewers on prod),
+#    * exposes environment-scoped secrets (MULE_ENC_KEY, ...) and variables
+#      (APP_BASE_URL). An environment secret with the same name as a
+#      repository secret wins, so prod can use its own connected app.
+# =============================================================================
+name: Deploy environment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: dev, test, uat or prod - must match a GitHub Environment and a pom.xml profile.
+        type: string
+        required: true
+      app_name:
+        type: string
+        required: true
+      app_version:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  MAVEN_OPTS: -Xmx1024m -Djava.awt.headless=true
+  MVN_FLAGS: -B -ntp -s .ci/maven-settings.xml
+
+jobs:
+  deploy:
+    name: Deploy + smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: ${{ inputs.environment }}
+    env:
+      DEPLOY_ENV: ${{ inputs.environment }}
+      APP: ${{ inputs.app_name }}:${{ inputs.app_version }}
+      ANYPOINT_CLIENT_ID: ${{ secrets.ANYPOINT_CLIENT_ID }}
+      ANYPOINT_CLIENT_SECRET: ${{ secrets.ANYPOINT_CLIENT_SECRET }}
+      MULE_ENC_KEY: ${{ secrets.MULE_ENC_KEY }}
+      API_ID: ${{ secrets.API_ID }}
+      PLATFORM_CLIENT_ID: ${{ secrets.PLATFORM_CLIENT_ID }}
+      PLATFORM_CLIENT_SECRET: ${{ secrets.PLATFORM_CLIENT_SECRET }}
+      APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Check deployment configuration
+        run: bash .ci/require-env.sh ANYPOINT_CLIENT_ID ANYPOINT_CLIENT_SECRET MULE_ENC_KEY
+
+      - name: Deploy ${{ inputs.environment }}
+        run: bash .ci/deploy.sh "$DEPLOY_ENV"
+
+      - name: Smoke test ${{ inputs.environment }}
+        run: bash .ci/smoke-test.sh "$DEPLOY_ENV" "$APP_BASE_URL"
+
+      - name: Summary
+        run: echo "✅ Deployed **${APP}** to **${DEPLOY_ENV}**" >> "$GITHUB_STEP_SUMMARY"

@@ -1,34 +1,76 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Configuration>
+<!--
+  Two appenders, chosen by where the app is running:
 
-    <!--These are some of the loggers you can enable. 
-        There are several more you can find in the documentation. 
-        Besides this log4j configuration, you can also use Java VM environment variables
-        to enable other logs like network (-Djavax.net.debug=ssl or all) and 
-        Garbage Collector (-XX:+PrintGC). These will be append to the console, so you will 
-        see them in the mule_ee.log file. -->
+    CloudHub / CloudHub 2.0  -> stdout is collected by the platform, so the
+                                Console appender is what you actually see in
+                                Runtime Manager and Anypoint Monitoring.
+    Hybrid / on-prem / RTF   -> the RollingFile appender writes to
+                                $MULE_HOME/logs.
 
-    <Appenders>
-        <RollingFile name="file" fileName="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}mule-api-base-template.log"
-                 filePattern="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}mule-api-base-template-%i.log">
-            <PatternLayout pattern="%-5p %d [%t] [processor: %X{processorPath}; event: %X{correlationId}] %c: %m%n"/>
-            <SizeBasedTriggeringPolicy size="10 MB"/>
-            <DefaultRolloverStrategy max="10"/>
-        </RollingFile>
-    </Appenders>
+  Both are attached; on CloudHub the file appender is harmless. If you deploy
+  only to CloudHub you can delete the RollingFile appender entirely.
 
-    <Loggers>
-        <!-- Http Logger shows wire traffic on DEBUG -->
-        <!--AsyncLogger name="org.mule.service.http.impl.service.HttpMessageLogger" level="DEBUG"/-->
-        <AsyncLogger name="org.mule.service.http" level="WARN"/>
-        <AsyncLogger name="org.mule.extension.http" level="WARN"/>
+  Log messages produced by src/main/mule/common/logging.xml are already JSON,
+  so keep the pattern minimal - wrapping JSON in a verbose prefix defeats
+  structured log parsing. `%X{correlationId}` is the runtime's own correlation
+  id and is what ties a request's lines together in a log aggregator.
+-->
+<Configuration status="WARN" name="mule-application">
 
-        <!-- Mule logger -->
-        <AsyncLogger name="org.mule.runtime.core.internal.processor.LoggerMessageProcessor" level="INFO"/>
+	<Properties>
+		<Property name="logPattern">%-5p %d{yyyy-MM-dd'T'HH:mm:ss.SSSZ} [%t] [event: %X{correlationId}] %c: %m%n</Property>
+		<Property name="logDir">${sys:mule.home}${sys:file.separator}logs</Property>
+		<!-- Overridable per environment with -Dlog.level=DEBUG -->
+		<Property name="rootLevel">${sys:log.level:-INFO}</Property>
+	</Properties>
 
-        <AsyncRoot level="INFO">
-            <AppenderRef ref="file"/>
-        </AsyncRoot>
-    </Loggers>
+	<Appenders>
+		<Console name="console" target="SYSTEM_OUT">
+			<PatternLayout pattern="${logPattern}"/>
+		</Console>
+
+		<RollingFile name="file"
+		             fileName="${logDir}${sys:file.separator}mule-api-base-template.log"
+		             filePattern="${logDir}${sys:file.separator}mule-api-base-template-%d{yyyy-MM-dd}-%i.log.gz">
+			<PatternLayout pattern="${logPattern}"/>
+			<Policies>
+				<TimeBasedTriggeringPolicy/>
+				<SizeBasedTriggeringPolicy size="10 MB"/>
+			</Policies>
+			<!-- Keep at most 10 rolled files, and nothing older than 30 days. -->
+			<DefaultRolloverStrategy max="10">
+				<Delete basePath="${logDir}" maxDepth="1">
+					<IfFileName glob="mule-api-base-template-*.log.gz"/>
+					<IfLastModified age="30d"/>
+				</Delete>
+			</DefaultRolloverStrategy>
+		</RollingFile>
+	</Appenders>
+
+	<Loggers>
+		<!-- Uncomment to dump raw HTTP wire traffic. Never leave on in uat/prod. -->
+		<!--<AsyncLogger name="org.mule.service.http.impl.service.HttpMessageLogger" level="DEBUG"/>-->
+		<AsyncLogger name="org.mule.service.http" level="WARN"/>
+		<AsyncLogger name="org.mule.extension.http" level="WARN"/>
+
+		<!-- Reduce startup and deployment noise. -->
+		<AsyncLogger name="com.mulesoft.mule.runtime.plugin" level="WARN"/>
+		<AsyncLogger name="org.mule.runtime.core.internal.util" level="WARN"/>
+		<AsyncLogger name="org.mule.maven.client" level="WARN"/>
+
+		<!-- Application loggers defined in common/logging.xml and the error handler. -->
+		<AsyncLogger name="api.inbound" level="INFO"/>
+		<AsyncLogger name="api.outbound" level="INFO"/>
+		<AsyncLogger name="api.checkpoint" level="INFO"/>
+		<AsyncLogger name="api.error" level="ERROR"/>
+
+		<AsyncLogger name="org.mule.runtime.core.internal.processor.LoggerMessageProcessor" level="INFO"/>
+
+		<AsyncRoot level="${rootLevel}">
+			<AppenderRef ref="console"/>
+			<AppenderRef ref="file"/>
+		</AsyncRoot>
+	</Loggers>
 
 </Configuration>

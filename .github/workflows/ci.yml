@@ -1,0 +1,80 @@
+# =============================================================================
+#  CI - build and MUnit on every pull request and every push to main
+# =============================================================================
+#  Deploys nothing. Promotion through dev -> test -> uat -> prod is the manual
+#  "Deploy" workflow (deploy.yml). Make the "Build & MUnit" check required in
+#  the branch protection rule for main so nothing merges untested.
+#
+#  Setup: GitHub-Actions-README.md
+# =============================================================================
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    # No paths-ignore here: a required check that never runs blocks the PR.
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'Jenkinsfile'
+      - 'azure-pipelines.yml'
+      - '.azure-pipelines/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MAVEN_OPTS: -Xmx1024m -Djava.awt.headless=true
+  # -B batch mode, -ntp no transfer progress: keeps the log readable.
+  MVN_FLAGS: -B -ntp -s .ci/maven-settings.xml
+
+jobs:
+  build:
+    name: Build & MUnit
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ANYPOINT_CLIENT_ID: ${{ secrets.ANYPOINT_CLIENT_ID }}
+      ANYPOINT_CLIENT_SECRET: ${{ secrets.ANYPOINT_CLIENT_SECRET }}
+      # Off unless the repository variable says otherwise: the untouched
+      # template sits near 24% coverage against a 70% threshold.
+      ENFORCE_COVERAGE: ${{ vars.MUNIT_ENFORCE_COVERAGE || 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Check Anypoint credentials
+        # Fork PRs receive no secrets, so they stop here with a clear message.
+        run: bash .ci/require-env.sh ANYPOINT_CLIENT_ID ANYPOINT_CLIENT_SECRET
+
+      - name: Build and run MUnit
+        # `package` includes the test phase, so MUnit and coverage run here.
+        run: mvn $MVN_FLAGS clean package -Dmunit.coverage.failBuild="$ENFORCE_COVERAGE"
+
+      - name: MUnit summary
+        if: ${{ !cancelled() }}
+        run: bash .ci/munit-summary.sh target/surefire-reports >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload MUnit reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: munit-reports
+          path: |
+            target/surefire-reports/
+            target/site/munit/coverage/
+          if-no-files-found: ignore
+          retention-days: 14

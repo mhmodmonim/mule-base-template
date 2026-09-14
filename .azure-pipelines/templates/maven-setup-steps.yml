@@ -1,0 +1,17 @@
+# JDK 17 + a cached local Maven repository. Shared by every job that runs Maven.
+# Requires the MAVEN_CACHE_FOLDER variable defined in azure-pipelines.yml.
+steps:
+  - task: JavaToolInstaller@0
+    displayName: Use JDK 17
+    inputs:
+      versionSpec: '17'
+      jdkArchitectureOption: x64
+      jdkSourceOption: PreInstalled
+
+  - task: Cache@2
+    displayName: Cache Maven repository
+    inputs:
+      key: 'maven | "$(Agent.OS)" | pom.xml'
+      restoreKeys: |
+        maven | "$(Agent.OS)"
+      path: $(MAVEN_CACHE_FOLDER)

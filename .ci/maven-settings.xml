@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+  Maven settings for hosted CI (GitHub Actions, Azure DevOps)
+  ============================================================================
+  Contains NO secrets and is safe to commit: every credential is read from an
+  environment variable that the pipeline maps from its secret store.
+
+      mvn -B -ntp -s .ci/maven-settings.xml package
+
+    ANYPOINT_CLIENT_ID       connected app client id        (required)
+    ANYPOINT_CLIENT_SECRET   connected app client secret    (required)
+    MULE_ENC_KEY             decrypts properties/<env>-secure.yaml (deploy only)
+    API_ID                   API Manager instance id        (optional)
+    PLATFORM_CLIENT_ID       API Manager client id          (optional)
+    PLATFORM_CLIENT_SECRET   API Manager client secret      (optional)
+
+  Jenkins does not use this file; it injects the equivalent managed file
+  (`maven-settings`, see Jenkins-README.md). settings-template.xml is the local
+  developer copy. Keep all three in sync when a property is added.
+
+  The file is deliberately NOT named settings.xml: .gitignore blocks that name
+  everywhere so a filled-in local copy can never be committed.
+  ============================================================================
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd">
+
+	<servers>
+		<!--
+		  Resolving dependencies from Exchange and publishing to it. The id must
+		  match the <repository> and <distributionManagement> ids in pom.xml.
+		  Connected apps use the literal username ~~~Client~~~.
+		-->
+		<server>
+			<id>anypoint-exchange-v3</id>
+			<username>~~~Client~~~</username>
+			<password>${env.ANYPOINT_CLIENT_ID}~?~${env.ANYPOINT_CLIENT_SECRET}</password>
+		</server>
+	</servers>
+
+	<profiles>
+		<profile>
+			<id>anypoint-credentials</id>
+			<properties>
+				<!-- Consumed by <cloudhub2Deployment> in pom.xml. -->
+				<anypoint.connectedApp.clientId>${env.ANYPOINT_CLIENT_ID}</anypoint.connectedApp.clientId>
+				<anypoint.connectedApp.clientSecret>${env.ANYPOINT_CLIENT_SECRET}</anypoint.connectedApp.clientSecret>
+
+				<!-- Passed to the app as a secure property at deploy time. -->
+				<enc.key>${env.MULE_ENC_KEY}</enc.key>
+
+				<!-- Only used once API autodiscovery is enabled in global.xml. -->
+				<api.id>${env.API_ID}</api.id>
+				<anypoint.platform.client_id>${env.PLATFORM_CLIENT_ID}</anypoint.platform.client_id>
+				<anypoint.platform.client_secret>${env.PLATFORM_CLIENT_SECRET}</anypoint.platform.client_secret>
+			</properties>
+		</profile>
+	</profiles>
+
+	<activeProfiles>
+		<activeProfile>anypoint-credentials</activeProfile>
+	</activeProfiles>
+</settings>

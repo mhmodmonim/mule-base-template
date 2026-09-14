@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!--
+	  The error envelope is part of the API contract - it is declared as
+	  dataTypes.ErrorResponse in api/api.raml and consumers parse it. These
+	  tests pin its shape so a refactor of the error handler cannot silently
+	  change what clients receive.
+	-->
+	<munit:config name="global-error-handler-test-suite.xml"/>
+
+	<munit:test name="error-envelope-uses-the-vars-set-by-the-handler-block" doc:name="Error envelope honours handler vars">
+		<munit:behavior>
+			<munit:set-event doc:name="Set error context">
+				<munit:variables>
+					<munit:variable key="httpStatus" value="#[404]"/>
+					<munit:variable key="errorMessage" value="Not found"/>
+					<munit:variable key="errorDescription" value="Example ex-9999 does not exist"/>
+					<munit:variable key="correlationId" value="test-correlation-id"/>
+				</munit:variables>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="build-error-response-sub-flow" doc:name="Build error response"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo(404)]" doc:name="Assert code"/>
+			<munit-tools:assert-that expression="#[payload.message]" is="#[MunitTools::equalTo('Not found')]" doc:name="Assert message"/>
+			<munit-tools:assert-that expression="#[payload.description]"
+			                         is="#[MunitTools::equalTo('Example ex-9999 does not exist')]" doc:name="Assert description"/>
+			<munit-tools:assert-that expression="#[payload.correlationId]"
+			                         is="#[MunitTools::equalTo('test-correlation-id')]"
+			                         message="The caller's correlation id must survive into the error body"
+			                         doc:name="Assert correlationId"/>
+			<munit-tools:assert-that expression="#[payload.dateTime]" is="#[MunitTools::notNullValue()]" doc:name="Assert dateTime"/>
+			<munit-tools:assert-that expression="#[vars.errorRaised]" is="#[MunitTools::equalTo(true)]" doc:name="Assert errorRaised marker"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="error-envelope-falls-back-to-500-when-no-status-was-set" doc:name="Error envelope defaults to 500">
+		<munit:behavior>
+			<munit:set-event doc:name="Set empty error context">
+				<munit:variables>
+					<munit:variable key="correlationId" value="test-correlation-id"/>
+				</munit:variables>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="build-error-response-sub-flow" doc:name="Build error response"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo(500)]"
+			                         message="An unmapped failure must never leak a 2xx" doc:name="Assert 500"/>
+			<munit-tools:assert-that expression="#[payload.message]" is="#[MunitTools::notNullValue()]" doc:name="Assert message present"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="error-envelope-forces-json-content-type-header" doc:name="Error envelope sets Content-Type">
+		<munit:behavior>
+			<munit:set-event doc:name="Set error context">
+				<munit:variables>
+					<munit:variable key="httpStatus" value="#[503]"/>
+					<munit:variable key="errorMessage" value="Service unavailable"/>
+				</munit:variables>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="build-error-response-sub-flow" doc:name="Build error response"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.outboundHeaders['Content-Type']]"
+			                         is="#[MunitTools::equalTo('application/json')]"
+			                         message="Error responses must always advertise JSON"
+			                         doc:name="Assert Content-Type"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

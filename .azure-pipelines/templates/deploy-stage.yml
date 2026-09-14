@@ -1,0 +1,70 @@
+# =============================================================================
+#  Deploy the application to ONE environment, then smoke test it.
+# =============================================================================
+#  The deployment job targets the Azure DevOps environment mule-<environment>.
+#  That is where approvals, branch control and exclusive locks are configured
+#  (Pipelines > Environments > mule-prod > Approvals and checks).
+#
+#  Variables come from the variable group mule-<environment>:
+#    MULE_ENC_KEY (secret, required), APP_BASE_URL (optional),
+#    API_ID / PLATFORM_CLIENT_ID / PLATFORM_CLIENT_SECRET (optional).
+#  A variable of the same name in mule-<environment> overrides mule-common, so
+#  prod can use its own connected app.
+# =============================================================================
+parameters:
+  - name: environment
+    type: string
+    values: [dev, test, uat, prod]
+  - name: dependsOn
+    type: object
+  - name: condition
+    type: string
+    default: succeeded()
+
+stages:
+  - stage: Deploy_${{ parameters.environment }}
+    displayName: Deploy ${{ parameters.environment }}
+    dependsOn: ${{ parameters.dependsOn }}
+    condition: ${{ parameters.condition }}
+    variables:
+      - group: mule-${{ parameters.environment }}
+    jobs:
+      - deployment: Deploy
+        displayName: Deploy + smoke test ${{ parameters.environment }}
+        environment: mule-${{ parameters.environment }}
+        timeoutInMinutes: 45
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # Deployment jobs download pipeline artifacts by default; the
+                # deploy builds from the checked-out commit instead.
+                - download: none
+
+                - checkout: self
+                  fetchDepth: 1
+
+                - template: maven-setup-steps.yml
+
+                - bash: bash .ci/require-env.sh ANYPOINT_CLIENT_ID ANYPOINT_CLIENT_SECRET MULE_ENC_KEY
+                  displayName: Check deployment configuration
+                  env:
+                    ANYPOINT_CLIENT_ID: $(ANYPOINT_CLIENT_ID)
+                    ANYPOINT_CLIENT_SECRET: $(ANYPOINT_CLIENT_SECRET)
+                    MULE_ENC_KEY: $(MULE_ENC_KEY)
+
+                - bash: bash .ci/deploy.sh "${{ parameters.environment }}"
+                  displayName: Deploy to ${{ parameters.environment }}
+                  env:
+                    MVN_FLAGS: $(MVN_FLAGS)
+                    ANYPOINT_CLIENT_ID: $(ANYPOINT_CLIENT_ID)
+                    ANYPOINT_CLIENT_SECRET: $(ANYPOINT_CLIENT_SECRET)
+                    MULE_ENC_KEY: $(MULE_ENC_KEY)
+                    API_ID: $(API_ID)
+                    PLATFORM_CLIENT_ID: $(PLATFORM_CLIENT_ID)
+                    PLATFORM_CLIENT_SECRET: $(PLATFORM_CLIENT_SECRET)
+
+                - bash: bash .ci/smoke-test.sh "${{ parameters.environment }}" "$APP_BASE_URL"
+                  displayName: Smoke test ${{ parameters.environment }}
+                  env:
+                    APP_BASE_URL: $(APP_BASE_URL)

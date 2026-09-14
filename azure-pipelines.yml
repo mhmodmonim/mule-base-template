@@ -1,0 +1,245 @@
+# =============================================================================
+#  Mule application CI/CD pipeline - Azure DevOps
+# =============================================================================
+#  Same promotion model as the Jenkinsfile: build, MUnit, optional Exchange
+#  publish, then dev -> test -> uat -> approval -> prod, each deploy followed
+#  by a /health-check smoke test.
+#
+#    * PR and push-to-main runs: Build + MUnit only (deploy stages skip).
+#    * Manual runs ("Run pipeline"): also promote up to the chosen environment.
+#
+#  Required Azure DevOps configuration (see Azure-DevOps-README.md):
+#    * Variable group  mule-common           ANYPOINT_CLIENT_ID, ANYPOINT_CLIENT_SECRET
+#    * Variable groups mule-dev|test|uat|prod MULE_ENC_KEY, APP_BASE_URL (+ optional)
+#    * Environments    mule-dev|test|uat|prod Approvals + branch control on mule-prod
+# =============================================================================
+
+name: $(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  batch: true
+  branches:
+    include: [main]
+  paths:
+    exclude:
+      - '**/*.md'
+      - Jenkinsfile
+      - .github
+
+# Honoured for GitHub / Bitbucket repositories. For Azure Repos, add a Build
+# validation branch policy on main instead (see Azure-DevOps-README.md).
+pr:
+  branches:
+    include: [main]
+
+parameters:
+  - name: environment
+    displayName: Highest environment to promote to (manual runs only; lower environments deploy first)
+    type: string
+    default: dev
+    values: [dev, test, uat, prod]
+  - name: skipTests
+    displayName: Skip MUnit (emergency hotfix only)
+    type: boolean
+    default: false
+  - name: enforceCoverage
+    displayName: Fail when MUnit coverage is below the pom.xml thresholds
+    type: boolean
+    default: true
+  - name: publishToExchange
+    displayName: Also publish the artifact to Anypoint Exchange
+    type: boolean
+    default: false
+
+variables:
+  - group: mule-common
+  - name: MAVEN_OPTS
+    value: -Xmx1024m -Djava.awt.headless=true
+  - name: MAVEN_CACHE_FOLDER
+    value: $(Pipeline.Workspace)/.m2/repository
+  # -B batch mode, -ntp no transfer progress: keeps the log readable.
+  - name: MVN_FLAGS
+    value: -B -ntp -s .ci/maven-settings.xml -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)
+
+# With an "Exclusive lock" check on each environment, only the latest queued
+# run deploys - the equivalent of disableConcurrentBuilds().
+lockBehavior: sequential
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  # ---------------------------------------------------------------------------
+  - stage: Build
+    displayName: Build
+    jobs:
+      - job: Package
+        displayName: Package mule-application
+        timeoutInMinutes: 30
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - template: .azure-pipelines/templates/maven-setup-steps.yml
+
+          - bash: bash .ci/require-env.sh ANYPOINT_CLIENT_ID ANYPOINT_CLIENT_SECRET
+            displayName: Check Anypoint credentials
+            env:
+              ANYPOINT_CLIENT_ID: $(ANYPOINT_CLIENT_ID)
+              ANYPOINT_CLIENT_SECRET: $(ANYPOINT_CLIENT_SECRET)
+
+          - bash: |
+              set -euo pipefail
+              app_name="$(mvn $MVN_FLAGS -q help:evaluate -Dexpression=project.artifactId -DforceStdout)"
+              app_version="$(mvn $MVN_FLAGS -q help:evaluate -Dexpression=project.version -DforceStdout)"
+              echo "Building ${app_name}:${app_version}"
+              echo "##vso[build.addbuildtag]${app_name}-${app_version}"
+              echo "##vso[build.updatebuildnumber]$(Build.BuildNumber)-${app_version}"
+            displayName: Read artifact coordinates
+            env:
+              MVN_FLAGS: $(MVN_FLAGS)
+              ANYPOINT_CLIENT_ID: $(ANYPOINT_CLIENT_ID)
+              ANYPOINT_CLIENT_SECRET: $(ANYPOINT_CLIENT_SECRET)
+
+          - bash: mvn $MVN_FLAGS clean package -DskipMunitTests
+            displayName: Package
+            env:
+              MVN_FLAGS: $(MVN_FLAGS)
+              ANYPOINT_CLIENT_ID: $(ANYPOINT_CLIENT_ID)
+              ANYPOINT_CLIENT_SECRET: $(ANYPOINT_CLIENT_SECRET)
+
+          - task: CopyFiles@2
+            displayName: Stage application jar
+            inputs:
+              SourceFolder: target
+              Contents: '*-mule-application.jar'
+              TargetFolder: $(Build.ArtifactStagingDirectory)/app
+
+          - publish: $(Build.ArtifactStagingDirectory)/app
+            displayName: Publish application artifact
+            artifact: mule-application
+
+  # ---------------------------------------------------------------------------
+  - ${{ if not(parameters.skipTests) }}:
+      - stage: MUnit
+        displayName: MUnit
+        dependsOn: []   # runs in parallel with Build
+        jobs:
+          - job: Test
+            displayName: MUnit + coverage
+            timeoutInMinutes: 45
+            steps:
+              - checkout: self
+                fetchDepth: 1
+
+              - template: .azure-pipelines/templates/maven-setup-steps.yml
+
+              - bash: bash .ci/require-env.sh ANYPOINT_CLIENT_ID ANYPOINT_CLIENT_SECRET
+                displayName: Check Anypoint credentials
+                env:
+                  ANYPOINT_CLIENT_ID: $(ANYPOINT_CLIENT_ID)
+                  ANYPOINT_CLIENT_SECRET: $(ANYPOINT_CLIENT_SECRET)
+
+              - bash: |
+                  set -euo pipefail
+                  # Manual runs use the parameter. PR/CI runs default to off
+                  # (the untouched template sits near 24%) unless the
+                  # MUNIT_ENFORCE_COVERAGE variable in mule-common says otherwise.
+                  if [ "$BUILD_REASON" = "Manual" ]; then
+                    enforce="${ENFORCE_PARAM,,}"
+                  else
+                    enforce="${MUNIT_ENFORCE_COVERAGE:-false}"
+                  fi
+                  echo "Coverage enforcement: ${enforce}"
+                  # -DskipMunitTests is the MUnit switch; -DskipTests does NOT skip it.
+                  mvn $MVN_FLAGS test -Dmunit.coverage.failBuild="${enforce}"
+                displayName: Run MUnit
+                env:
+                  MVN_FLAGS: $(MVN_FLAGS)
+                  ANYPOINT_CLIENT_ID: $(ANYPOINT_CLIENT_ID)
+                  ANYPOINT_CLIENT_SECRET: $(ANYPOINT_CLIENT_SECRET)
+                  ENFORCE_PARAM: ${{ parameters.enforceCoverage }}
+
+              - task: PublishTestResults@2
+                displayName: Publish MUnit results
+                condition: succeededOrFailed()
+                inputs:
+                  testResultsFormat: JUnit
+                  testResultsFiles: target/surefire-reports/TEST-*.xml
+                  testRunTitle: MUnit
+                  mergeTestResults: true
+                  failTaskOnMissingResultsFile: false
+
+              - bash: |
+                  out="$(Build.ArtifactStagingDirectory)/munit"
+                  mkdir -p "$out"
+                  echo "MUnit reports for build $(Build.BuildNumber)" > "$out/README.txt"
+                  [ -d target/site/munit/coverage ] && cp -r target/site/munit/coverage "$out/" || true
+                  [ -d target/surefire-reports ] && cp -r target/surefire-reports "$out/" || true
+                displayName: Collect MUnit reports
+                condition: succeededOrFailed()
+
+              - publish: $(Build.ArtifactStagingDirectory)/munit
+                displayName: Publish MUnit reports (coverage/summary.html)
+                artifact: munit-reports-attempt-$(System.JobAttempt)
+                condition: succeededOrFailed()
+
+  # ---------------------------------------------------------------------------
+  - ${{ if parameters.publishToExchange }}:
+      - stage: Exchange
+        displayName: Publish to Exchange
+        dependsOn:
+          - Build
+          - ${{ if not(parameters.skipTests) }}:
+              - MUnit
+        condition: and(succeeded(), eq(variables['Build.Reason'], 'Manual'))
+        jobs:
+          - job: Publish
+            displayName: mvn deploy (Exchange)
+            timeoutInMinutes: 30
+            steps:
+              - checkout: self
+                fetchDepth: 1
+              - template: .azure-pipelines/templates/maven-setup-steps.yml
+              - bash: mvn $MVN_FLAGS deploy -DskipMunitTests
+                displayName: Publish
+                env:
+                  MVN_FLAGS: $(MVN_FLAGS)
+                  ANYPOINT_CLIENT_ID: $(ANYPOINT_CLIENT_ID)
+                  ANYPOINT_CLIENT_SECRET: $(ANYPOINT_CLIENT_SECRET)
+
+  # ---------------------------------------------------------------------------
+  #  Promotion chain. Stages above the chosen environment are not even
+  #  compiled into the run; dev only proceeds on manual runs, and each later
+  #  stage depends on the one before it.
+  # ---------------------------------------------------------------------------
+  - template: .azure-pipelines/templates/deploy-stage.yml
+    parameters:
+      environment: dev
+      dependsOn:
+        - Build
+        - ${{ if not(parameters.skipTests) }}:
+            - MUnit
+        - ${{ if parameters.publishToExchange }}:
+            - Exchange
+      condition: and(succeeded(), eq(variables['Build.Reason'], 'Manual'))
+
+  - ${{ if in(parameters.environment, 'test', 'uat', 'prod') }}:
+      - template: .azure-pipelines/templates/deploy-stage.yml
+        parameters:
+          environment: test
+          dependsOn: [Deploy_dev]
+
+  - ${{ if in(parameters.environment, 'uat', 'prod') }}:
+      - template: .azure-pipelines/templates/deploy-stage.yml
+        parameters:
+          environment: uat
+          dependsOn: [Deploy_test]
+
+  # Approval happens on the mule-prod environment (Approvals and checks):
+  # the stage waits there before any step runs.
+  - ${{ if eq(parameters.environment, 'prod') }}:
+      - template: .azure-pipelines/templates/deploy-stage.yml
+        parameters:
+          environment: prod
+          dependsOn: [Deploy_uat]

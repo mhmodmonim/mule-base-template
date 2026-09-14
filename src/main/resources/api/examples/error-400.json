@@ -1,0 +1,7 @@
+{
+  "code": 400,
+  "message": "Bad request",
+  "description": [ "name: expected minLength 1" ],
+  "dateTime": "2026-01-01T00:00:00Z",
+  "correlationId": "0f1c2d3e-4a5b-6c7d-8e9f-0a1b2c3d4e5f"
+}

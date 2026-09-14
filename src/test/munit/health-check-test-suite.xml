@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<munit:config name="health-check-test-suite.xml"/>
+
+	<munit:test name="health-check-returns-UP" doc:name="health-check returns UP">
+		<munit:execution>
+			<flow-ref name="get:\health-check:Router" doc:name="Call health-check"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[payload.status]"
+			                         is="#[MunitTools::equalTo('UP')]"
+			                         message="Health check must report UP"
+			                         doc:name="Assert status"/>
+			<munit-tools:assert-that expression="#[vars.httpStatus]"
+			                         is="#[MunitTools::equalTo(200)]"
+			                         message="Health check must set httpStatus 200"
+			                         doc:name="Assert httpStatus"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="health-check-reports-build-and-environment-metadata" doc:name="health-check reports build metadata">
+		<munit:execution>
+			<flow-ref name="get:\health-check:Router" doc:name="Call health-check"/>
+		</munit:execution>
+		<munit:validation>
+			<!--
+			  app.version comes from the Maven-filtered build-info.properties.
+			  If this assertion fails, the maven-resources-plugin execution in
+			  pom.xml did not run and the placeholder leaked through.
+			-->
+			<munit-tools:assert-that expression="#[payload.version]"
+			                         is="#[MunitTools::not(MunitTools::containsString('@'))]"
+			                         message="app.version was not filtered at build time"
+			                         doc:name="Assert version is filtered"/>
+			<munit-tools:assert-that expression="#[payload.environment]"
+			                         is="#[MunitTools::equalTo('test')]"
+			                         message="Health check must echo the active environment"
+			                         doc:name="Assert environment"/>
+			<munit-tools:assert-that expression="#[payload.application]"
+			                         is="#[MunitTools::notNullValue()]"
+			                         doc:name="Assert application name"/>
+			<munit-tools:assert-that expression="#[payload.timestamp]"
+			                         is="#[MunitTools::notNullValue()]"
+			                         doc:name="Assert timestamp"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

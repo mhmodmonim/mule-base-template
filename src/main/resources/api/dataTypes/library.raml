@@ -1,0 +1,63 @@
+#%RAML 1.0 Library
+usage: Shared data types for the base template API.
+
+types:
+
+  HealthStatus:
+    type: object
+    additionalProperties: false
+    properties:
+      status:
+        type: string
+        enum: [ UP, DOWN ]
+      application: string
+      version: string
+      environment: string
+      timestamp: datetime
+
+  Example:
+    type: object
+    additionalProperties: false
+    properties:
+      id: string
+      name: string
+      description?: string
+      createdAt: datetime
+
+  ExampleRequest:
+    type: object
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        minLength: 1
+        maxLength: 120
+      description?:
+        type: string
+        maxLength: 500
+
+  ExampleCollection:
+    type: object
+    additionalProperties: false
+    properties:
+      total: integer
+      limit: integer
+      offset: integer
+      items: Example[]
+
+  ErrorResponse:
+    type: object
+    additionalProperties: false
+    description: Canonical error envelope produced by the global error handler.
+    properties:
+      code:
+        type: integer
+        description: HTTP status code.
+      message:
+        type: string
+        description: Short, client-safe summary.
+      description:
+        type: string | array
+        description: Detail, or the list of validation failures.
+      dateTime: datetime
+      correlationId: string
